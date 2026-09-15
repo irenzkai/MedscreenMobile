@@ -263,7 +263,6 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
       showError('Preferred visit date cannot be in the past.');
       return;
     }
-
     setAppointmentDate(dateStr);
     setSelectedSlot(null);
     setSelectedSlotDisplay('');
@@ -290,7 +289,6 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
       showError(`"${svc.name}" is restricted to Male patients only.`);
       return;
     }
-
     setStepErrorBanner(null);
     setSelectedServiceIds((prev) =>
       prev.includes(svc.id) ? prev.filter((id) => id !== svc.id) : [...prev, svc.id]
@@ -368,7 +366,6 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
       if (!barangay.trim()) errs.barangay = 'Barangay is required.';
 
       setFieldErrors(errs);
-
       if (Object.keys(errs).length > 0) {
         showError('Please review the highlighted omissions below before continuing.');
         return false;
@@ -420,6 +417,7 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
   const handleSubmit = async () => {
     if (!validateStep()) return;
     setSubmitting(true);
+
     try {
       const formData = new FormData();
       formData.append('target_type', targetType);
@@ -437,11 +435,15 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
       formData.append('patient_sex', sex);
       formData.append('patient_birthdate', birthdate.trim());
       formData.append('patient_phone', formatToStandardPhone(phoneDisplay));
+
+      // Append user account email so it saves directly to the patient_email database column
+      const resolvedEmail = user?.email ? user.email.trim().toLowerCase() : '';
+      formData.append('patient_email', resolvedEmail);
+
       formData.append('patient_province', province.trim().toUpperCase());
       formData.append('patient_city', city.trim().toUpperCase());
       formData.append('patient_barangay', barangay.trim().toUpperCase());
       formData.append('patient_street', street.trim().toUpperCase());
-
       formData.append('appointment_date', appointmentDate);
       formData.append('time_slot', selectedSlot || '');
       formData.append('payment_method', paymentMethod);
@@ -588,7 +590,6 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
                         d.name ||
                         formatPatientName(d.first_name, d.middle_name, d.last_name, d.suffix);
                       const displaySex = d.sex || 'Male';
-
                       return (
                         <TouchableOpacity
                           key={d.id}
@@ -682,7 +683,6 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
               <Text style={[styles.subCardHeader, { color: theme.brandAccent }]}>
                 Personal Identity
               </Text>
-
               <Input
                 label="First Name"
                 value={firstName}
@@ -711,6 +711,7 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
                   />
                 </View>
               </View>
+
               {!noMiddleName && (
                 <Input
                   value={middleName}
@@ -918,7 +919,6 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
                 const isRestricted =
                   (svc.gender_restriction === 'female' && sex === 'Male') ||
                   (svc.gender_restriction === 'male' && sex === 'Female');
-
                 return (
                   <ServiceItem
                     key={svc.id}

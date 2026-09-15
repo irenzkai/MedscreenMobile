@@ -5,10 +5,10 @@ import { CONFIG } from '../../constants/config';
 export const TOKEN_STORAGE_KEY = 'medscreen_patient_token';
 export const USER_STORAGE_KEY = 'medscreen_patient_user';
 
-// Create Axios client instance
+// Create Axios client instance with 60s timeout for Render spin-up tolerance
 export const apiClient: AxiosInstance = axios.create({
   baseURL: CONFIG.API_BASE_URL,
-  timeout: 15000,
+  timeout: 60000,
   headers: {
     Accept: 'application/json',
     'Content-Type': 'application/json',

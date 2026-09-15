@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { AppStackParamList } from '../../navigation/AppNavigator';
 import { useTheme } from '../../hooks/useTheme';
+import { useAuth } from '../../context/AuthContext';
 import { appointmentsApi } from '../../services/api/appointments';
 import { servicesApi } from '../../services/api/services';
 import {
@@ -66,6 +67,7 @@ const RESUBMIT_STEP_LABELS = ['Details', 'Services', 'Schedule', 'Payment'];
 export const ResubmitAppointmentScreen: React.FC<Props> = ({ route, navigation }) => {
   const { appointmentId } = route.params;
   const theme = useTheme();
+  const { user } = useAuth();
   const scrollViewRef = useRef<ScrollView | null>(null);
   const { contentOffsetY, contentHeight, layoutHeight, handleScroll } = useScrollShortcut();
 
@@ -181,6 +183,7 @@ export const ResubmitAppointmentScreen: React.FC<Props> = ({ route, navigation }
         setLoading(false);
       }
     };
+
     initData();
   }, [appointmentId]);
 
@@ -216,7 +219,6 @@ export const ResubmitAppointmentScreen: React.FC<Props> = ({ route, navigation }
       showError('Preferred visit date cannot be in the past.');
       return;
     }
-
     setAppointmentDate(dateStr);
     setSelectedSlot(null);
     setSelectedSlotDisplay('');
@@ -243,7 +245,6 @@ export const ResubmitAppointmentScreen: React.FC<Props> = ({ route, navigation }
       showError(`"${svc.name}" is restricted to Male patients only.`);
       return;
     }
-
     setErrorBanner(null);
     setSelectedServiceIds((prev) =>
       prev.includes(svc.id) ? prev.filter((id) => id !== svc.id) : [...prev, svc.id]
@@ -363,6 +364,7 @@ export const ResubmitAppointmentScreen: React.FC<Props> = ({ route, navigation }
   const handleFinalSubmit = async () => {
     if (!validateStep() || !appointment) return;
     setSubmitting(true);
+
     try {
       const formData = new FormData();
       formData.append('patient_first_name', firstName.trim().toUpperCase());
@@ -375,6 +377,17 @@ export const ResubmitAppointmentScreen: React.FC<Props> = ({ route, navigation }
       formData.append('patient_sex', sex);
       formData.append('patient_birthdate', birthdate.trim());
       formData.append('patient_phone', formatToStandardPhone(phoneDisplay));
+
+      // Resubmit email resolution fallback
+      const resolvedEmail =
+        appointment.patient_email ||
+        appointment.user?.email ||
+        user?.email ||
+        '';
+      if (resolvedEmail) {
+        formData.append('patient_email', resolvedEmail.trim().toLowerCase());
+      }
+
       formData.append('patient_province', province.trim().toUpperCase());
       formData.append('patient_city', city.trim().toUpperCase());
       formData.append('patient_barangay', barangay.trim().toUpperCase());
@@ -524,6 +537,7 @@ export const ResubmitAppointmentScreen: React.FC<Props> = ({ route, navigation }
                   />
                 </View>
               </View>
+
               {!noMiddleName && (
                 <Input
                   value={middleName}
@@ -728,7 +742,6 @@ export const ResubmitAppointmentScreen: React.FC<Props> = ({ route, navigation }
                 const isRestricted =
                   (svc.gender_restriction === 'female' && sex === 'Male') ||
                   (svc.gender_restriction === 'male' && sex === 'Female');
-
                 return (
                   <ServiceItem
                     key={svc.id}

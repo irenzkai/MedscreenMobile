@@ -1,31 +1,48 @@
 {
   "expo": {
-    "name": "MedscreenMobile",
-    "slug": "MedscreenMobile",
+    "name": "Medscreen Pocket",
+    "slug": "medscreen-patient",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/images/logo.jpg",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/images/logo.jpg",
+      "resizeMode": "contain",
+      "backgroundColor": "#1C232D"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.medscreen.patient",
+      "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/logo.jpg",
+        "backgroundColor": "#1C232D"
       },
-      "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
+      "permissions": [
+        "INTERNET",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "plugins": [
-      "expo-image",
-      "expo-secure-store",
-      "expo-web-browser",
-      "expo-sharing"
-    ]
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "55913cbd-232c-4ba4-891a-784a6e7e9c6c"
+      }
+    },
+    "owner": "irenzkai"
   }
 }

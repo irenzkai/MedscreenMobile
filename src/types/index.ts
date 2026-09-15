@@ -1,7 +1,3 @@
-// ============================================================================
-// Medscreen Patient Portal - Core TypeScript Definitions
-// ============================================================================
-
 export type UserRole = 'user' | 'staff' | 'lab_tech' | 'admin';
 
 export type Sex = 'Male' | 'Female';
@@ -152,6 +148,7 @@ export interface Appointment {
   results_released_at?: string | null;
   created_at: string;
   updated_at: string;
+  user?: User | null;
   services?: Service[];
   dependent?: Dependent | null;
   result?: AppointmentResult | null;
@@ -165,6 +162,11 @@ export interface AppointmentResult {
   med_status?: string;
   radio_status?: string;
   drug_status?: string;
+  lab_scan?: string | null;
+  radio_scan?: string | null;
+  xray_image?: string | null;
+  drug_test_scan?: string | null;
+  med_cert_scan?: string | null;
 }
 
 export interface HistoryScan {

@@ -122,7 +122,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
         {/* Login Form Card */}
         <Card style={styles.formCard}>
-          <Text style={[styles.formTitle, { color: theme.textMain }]}>Welcome Back</Text>
+          <Text style={[styles.formTitle, { color: theme.textMain }]}>Login Account</Text>
           <Text style={[styles.formSub, { color: theme.textMuted }]}>
             Sign in with your registered patient account credentials.
           </Text>

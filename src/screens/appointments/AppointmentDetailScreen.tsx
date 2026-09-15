@@ -11,6 +11,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { AppStackParamList } from '../../navigation/AppNavigator';
 import { useTheme } from '../../hooks/useTheme';
+import { useAuth } from '../../context/AuthContext';
 import { appointmentsApi } from '../../services/api/appointments';
 import { Appointment } from '../../types';
 import { Header } from '../../components/common/Header';
@@ -52,6 +53,7 @@ interface ResultReportItem {
 export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { appointmentId } = route.params;
   const theme = useTheme();
+  const { user } = useAuth();
 
   const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -116,10 +118,16 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
     );
   }
 
+  // Reliable email resolution fallback chain
+  const resolvedPatientEmail =
+    appointment.patient_email ||
+    appointment.user?.email ||
+    user?.email ||
+    'your registered email';
+
   const isExpired = isAppointmentExpired(appointment);
   const effectiveStatus = getEffectiveAppointmentStatus(appointment);
   const displayAge = calculatePatientAge(appointment);
-
   const isBulk = !!appointment.batch_id;
   const isDependent = !!appointment.dependent_id;
   const categoryLabel = isBulk ? 'BULK' : isDependent ? 'DEPENDENT' : 'PERSONAL';
@@ -237,14 +245,14 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
   const handleExecuteForwardResults = async () => {
     setForwardLoading(true);
     try {
-      const res = await appointmentsApi.forwardResultEmail(appointment.id);
+      const res = await appointmentsApi.forwardResultEmail(appointment.id, resolvedPatientEmail);
       setForwardConfirmVisible(false);
       setSuccessModalConfig({
         visible: true,
         title: 'Results Dispatched',
         message:
           res.message ||
-          `Encrypted medical results have been securely sent to ${appointment.patient_email}.`,
+          `Encrypted medical results have been securely sent to ${resolvedPatientEmail}.`,
       });
     } catch {
       setForwardConfirmVisible(false);
@@ -341,24 +349,35 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
           <Text style={[styles.sectionTitle, { color: theme.brandAccent }]}>
             <Ionicons name="calendar-outline" size={14} /> Schedule & Location
           </Text>
+
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Visit Date:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
               {formatDate(appointment.appointment_date)}
             </Text>
           </View>
+
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Time Slot:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
               {formatTimeSlot(appointment.time_slot)}
             </Text>
           </View>
+
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Contact Phone:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
               {appointment.patient_phone || 'N/A'}
             </Text>
           </View>
+
+          <View style={styles.keyValueRow}>
+            <Text style={[styles.keyText, { color: theme.textMuted }]}>Patient Email:</Text>
+            <Text style={[styles.valText, { color: theme.textMain }]}>
+              {resolvedPatientEmail}
+            </Text>
+          </View>
+
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Residential Address:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
@@ -461,7 +480,6 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
               {appointment.payment_status.toUpperCase()}
             </Text>
           </View>
-
           {appointment.payment_receipt ? (
             <TouchableOpacity
               style={[
@@ -527,7 +545,6 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                       </Text>
                     </View>
                   </View>
-
                   <View style={styles.reportButtonsRow}>
                     <TouchableOpacity
                       style={[styles.reportPreviewBtn, { backgroundColor: theme.brandAccent }]}
@@ -542,7 +559,6 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                       <Ionicons name="eye-outline" size={14} color="#1C232D" />
                       <Text style={styles.reportPreviewBtnText}>PREVIEW</Text>
                     </TouchableOpacity>
-
                     <TouchableOpacity
                       style={[
                         styles.reportDownloadBtn,
@@ -582,7 +598,6 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
               style={{ marginBottom: Spacing.sm }}
             />
           )}
-
           {canCancel && (
             <Button
               title="Cancel Appointment"
@@ -601,7 +616,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
         type="info"
         icon="mail-outline"
         title="Forward Results"
-        message={`Send an encrypted, password-protected PDF copy of your clinical results to ${appointment.patient_email}?`}
+        message={`Send an encrypted, password-protected PDF copy of your clinical results to ${resolvedPatientEmail}?`}
         confirmText="Send Results"
         cancelText="Cancel"
         confirmVariant="primary"
@@ -616,8 +631,8 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
         type="danger"
         icon="close-circle-outline"
         title="Cancel Appointment"
-        message={`Are you sure you want to cancel Appointment #${appointment.id}? The reserved schedule slot will be reopened.`}
-        confirmText="Cancel Booking"
+        message={`Are you sure you want to cancel? The reserved schedule slot will be reopened.`}
+        confirmText="Cancel"
         cancelText="Keep"
         confirmVariant="danger"
         loading={cancelLoading}
