@@ -18,7 +18,6 @@ import { Service } from '../../types';
 import { Header } from '../../components/common/Header';
 import { Input } from '../../components/common/Input';
 import { ServiceItem } from '../../components/appointments/ServiceItem';
-import { Button } from '../../components/common/Button';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
@@ -54,7 +53,6 @@ export const ServicesScreen: React.FC = () => {
     fetchCatalog();
   };
 
-  // Filter list based on selected tab and query string
   const filteredServices = useMemo(() => {
     return services.filter((svc) => {
       const matchesCategory = svc.category === activeCategory;
@@ -71,9 +69,8 @@ export const ServicesScreen: React.FC = () => {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bgMain }]}>
+      {/* Top Navbar Header */}
       <Header
-        title="Diagnostic Tests"
-        subtitle="Catalog & Patient Guidelines"
         rightAction={
           <TouchableOpacity
             onPress={() => navigation.navigate('CreateAppointment')}
@@ -86,16 +83,25 @@ export const ServicesScreen: React.FC = () => {
       />
 
       <View style={styles.container}>
+        {/* LOWERED SECTION TITLE */}
+        <View style={styles.pageTitleBlock}>
+          <Text style={[styles.pageMainTitle, { color: theme.brandAccent }]}>
+            DIAGNOSTIC TESTS
+          </Text>
+          <Text style={[styles.pageSubtitle, { color: theme.textMuted }]}>
+            Catalog, examination requirements, and patient guidelines.
+          </Text>
+        </View>
+
         {/* Search Bar */}
         <Input
-          placeholder="Search examinations, tests, prep..."
+          placeholder="Search examinations, tests, prep guidelines..."
           value={searchQuery}
           onChangeText={setSearchQuery}
-          containerStyle={{ marginBottom: Spacing.sm }}
-          prefixText=""
+          containerStyle={{ marginBottom: Spacing.xs }}
         />
 
-        {/* Category Tabs: Individual Tests vs Health Packages */}
+        {/* Category Navigation Tabs */}
         <View style={styles.tabBar}>
           <TouchableOpacity
             activeOpacity={0.8}
@@ -148,13 +154,10 @@ export const ServicesScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Content Services List */}
+        {/* Content Services List (Clean card presentation without per-item buttons) */}
         {loading ? (
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={theme.brandAccent} />
-            <Text style={[styles.loadingText, { color: theme.textMuted }]}>
-              Loading diagnostic test catalog...
-            </Text>
           </View>
         ) : (
           <ScrollView
@@ -173,27 +176,17 @@ export const ServicesScreen: React.FC = () => {
                 <Ionicons name="search-outline" size={36} color={theme.textMuted} />
                 <Text style={[styles.emptyTitle, { color: theme.textMain }]}>No Tests Found</Text>
                 <Text style={[styles.emptySub, { color: theme.textMuted }]}>
-                  No laboratory examinations match your search query.
+                  No examinations match your search query.
                 </Text>
               </View>
             ) : (
               filteredServices.map((service) => (
-                <View key={service.id} style={styles.serviceItemWrap}>
-                  <ServiceItem
-                    service={service}
-                    selectable={false}
-                    disabled={false}
-                  />
-                  <View style={styles.itemActions}>
-                    <Button
-                      title="Select & Book Test"
-                      size="sm"
-                      variant="outline"
-                      onPress={() => navigation.navigate('CreateAppointment')}
-                      icon={<Ionicons name="calendar" size={14} color={theme.brandAccent} />}
-                    />
-                  </View>
-                </View>
+                <ServiceItem
+                  key={service.id}
+                  service={service}
+                  selectable={false}
+                  disabled={false}
+                />
               ))
             )}
           </ScrollView>
@@ -205,7 +198,19 @@ export const ServicesScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  container: { flex: 1, padding: Spacing.md },
+  container: { flex: 1, paddingHorizontal: Spacing.md },
+  pageTitleBlock: {
+    marginVertical: Spacing.sm,
+  },
+  pageMainTitle: {
+    fontSize: Typography.sizes.lg,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  pageSubtitle: {
+    fontSize: Typography.sizes.xs,
+    marginTop: 2,
+  },
   bookHeaderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -215,7 +220,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   bookHeaderBtnText: { color: '#1C232D', fontSize: 10, fontWeight: '800' },
-  tabBar: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
+  tabBar: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
   tabBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -227,10 +232,7 @@ const styles = StyleSheet.create({
   },
   tabBtnText: { fontSize: Typography.sizes.xs, fontWeight: '800', textTransform: 'uppercase' },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { fontSize: Typography.sizes.xs, marginTop: Spacing.sm },
   listContent: { paddingBottom: 40 },
-  serviceItemWrap: { marginBottom: Spacing.sm },
-  itemActions: { marginTop: -4, marginBottom: Spacing.sm, alignItems: 'flex-end' },
   emptyBox: {
     padding: Spacing.xl,
     borderRadius: BorderRadius.lg,

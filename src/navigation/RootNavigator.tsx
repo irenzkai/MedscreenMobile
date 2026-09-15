@@ -7,10 +7,9 @@ import { AuthNavigator } from './AuthNavigator';
 import { AppNavigator } from './AppNavigator';
 
 export const RootNavigator: React.FC = () => {
-  const { isAuthenticated, isEmailVerified, isLoading } = useAuth();
+  const { isAuthenticated, isEmailVerified, isLoading, pendingPromotionData } = useAuth();
   const theme = useTheme();
 
-  // App Cold Boot Loading Indicator
   if (isLoading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: theme.bgMain }]}>
@@ -19,17 +18,37 @@ export const RootNavigator: React.FC = () => {
     );
   }
 
+  // If a promotion was triggered, mount directly to Register with prefilled params
+  const unauthenticatedInitialRoute = pendingPromotionData ? 'Register' : 'Login';
+  const navKey = !isAuthenticated
+    ? pendingPromotionData
+      ? 'auth-promote'
+      : 'auth-guest'
+    : !isEmailVerified
+    ? 'auth-unverified'
+    : 'app-patient';
+
   return (
     <NavigationContainer>
       {!isAuthenticated ? (
-        // Unauthenticated Guest Flow
-        <AuthNavigator initialRouteName="Login" />
+        <AuthNavigator
+          key={navKey}
+          initialRouteName={unauthenticatedInitialRoute}
+          initialParams={
+            pendingPromotionData
+              ? {
+                  Register: {
+                    promoteId: pendingPromotionData.promoteId,
+                    initialData: pendingPromotionData.initialData,
+                  },
+                }
+              : undefined
+          }
+        />
       ) : !isEmailVerified ? (
-        // Authenticated but Email Unverified Guard
-        <AuthNavigator initialRouteName="VerifyAccount" />
+        <AuthNavigator key={navKey} initialRouteName="VerifyAccount" />
       ) : (
-        // Authenticated Patient Application
-        <AppNavigator />
+        <AppNavigator key={navKey} />
       )}
     </NavigationContainer>
   );

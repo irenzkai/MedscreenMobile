@@ -1,8 +1,9 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { NavigatorScreenParams } from '@react-navigation/native';
 import { useTheme } from '../hooks/useTheme';
 
-import { PatientTabs } from './PatientTabs';
+import { PatientTabs, PatientTabsParamList } from './PatientTabs';
 import { AppointmentDetailScreen } from '../screens/appointments/AppointmentDetailScreen';
 import { CreateAppointmentScreen } from '../screens/appointments/CreateAppointmentScreen';
 import { ResubmitAppointmentScreen } from '../screens/appointments/ResubmitAppointmentScreen';
@@ -12,7 +13,7 @@ import { EditDependentScreen } from '../screens/dependents/EditDependentScreen';
 import { NotificationsScreen } from '../screens/notifications/NotificationsScreen';
 
 export type AppStackParamList = {
-  PatientTabs: undefined;
+  PatientTabs: NavigatorScreenParams<PatientTabsParamList> | undefined;
   AppointmentDetail: { appointmentId: number };
   CreateAppointment: { initialTarget?: 'self' | 'dependent'; dependentId?: number } | undefined;
   ResubmitAppointment: { appointmentId: number };

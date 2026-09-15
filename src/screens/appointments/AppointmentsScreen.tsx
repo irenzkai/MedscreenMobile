@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
+  Modal,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,22 +16,48 @@ import { PatientTabsParamList } from '../../navigation/PatientTabs';
 import { AppStackParamList } from '../../navigation/AppNavigator';
 import { useTheme } from '../../hooks/useTheme';
 import { appointmentsApi } from '../../services/api/appointments';
-import { Appointment, AppointmentStatus } from '../../types';
+import { Appointment } from '../../types';
 import { Header } from '../../components/common/Header';
 import { Input } from '../../components/common/Input';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
+import { ActionModal } from '../../components/common/ActionModal';
 import { AppointmentCard } from '../../components/appointments/AppointmentCard';
-import { alertBulkWebExclusive } from '../../utils/externalLinks';
-import { Spacing, Typography, BorderRadius } from '../../constants/theme';
+import { LightboxModal } from '../../components/common/LightboxModal';
+import {
+  ScrollShortcutButton,
+  useScrollShortcut,
+} from '../../components/common/ScrollShortcutButton';
+import { openWebUrl } from '../../utils/externalLinks';
+import { EXTERNAL_ROUTES } from '../../constants/config';
+import {
+  isAppointmentExpired,
+  getEffectiveAppointmentStatus,
+} from '../../utils/formatters';
+import { Spacing, Typography, BorderRadius, StatusColors } from '../../constants/theme';
 
 type RouteProps = RouteProp<PatientTabsParamList, 'Appointments'>;
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
+
+const STATUS_OPTIONS: Array<{ key: string; label: string; color: string }> = [
+  { key: 'all', label: 'All Statuses', color: '#19D38C' },
+  { key: 'pending', label: 'Pending', color: StatusColors.pending.text },
+  { key: 'approved', label: 'Approved', color: StatusColors.approved.text },
+  { key: 'retest', label: 'Retest Required', color: StatusColors.retest.text },
+  { key: 'tested', label: 'Tested', color: StatusColors.tested.text },
+  { key: 'encoded', label: 'Encoded', color: StatusColors.encoded.text },
+  { key: 'released', label: 'Released', color: StatusColors.released.text },
+  { key: 'returned', label: 'Returned', color: StatusColors.returned.text },
+  { key: 'canceled', label: 'Canceled', color: StatusColors.canceled.text },
+  { key: 'expired', label: 'Expired', color: StatusColors.expired.text },
+];
 
 export const AppointmentsScreen: React.FC = () => {
   const theme = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const { contentOffsetY, contentHeight, layoutHeight, handleScroll } = useScrollShortcut();
 
   const [activeTab, setActiveTab] = useState<'self' | 'family' | 'bulk'>(
     route.params?.initialTab || 'self'
@@ -40,14 +66,47 @@ export const AppointmentsScreen: React.FC = () => {
   const [dependentAppointments, setDependentAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [statusDropdownVisible, setStatusDropdownVisible] = useState<boolean>(false);
+
+  // External site redirect modal
+  const [bulkRedirectModalVisible, setBulkRedirectModalVisible] = useState<boolean>(false);
+
+  // Confirmation & Success Modals
+  const [confirmModalConfig, setConfirmModalConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText: string;
+    cancelText?: string;
+    icon?: keyof typeof Ionicons.glyphMap;
+    onConfirm: () => Promise<void>;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+    onConfirm: async () => {},
+  });
+
+  const [successModalConfig, setSuccessModalConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+  }>({ visible: false, title: '', message: '' });
+
+  // Lightbox modal state
+  const [lightboxVisible, setLightboxVisible] = useState(false);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState('');
 
   const fetchAppointments = useCallback(async () => {
     try {
       const res = await appointmentsApi.getAppointments();
-      setSelfAppointments(res.self);
-      setDependentAppointments(res.dependents);
+      setSelfAppointments(res.self || []);
+      setDependentAppointments(res.dependents || []);
     } catch (error) {
       console.error('Error fetching appointments:', error);
     } finally {
@@ -65,17 +124,19 @@ export const AppointmentsScreen: React.FC = () => {
     fetchAppointments();
   };
 
-  // Filter current tab appointments by search query and clinical status
   const currentList = useMemo(() => {
-    const list = activeTab === 'self' ? selfAppointments : activeTab === 'family' ? dependentAppointments : [];
-    return list.filter((app) => {
-      // Status filtering
-      const matchesStatus =
-        selectedStatusFilter === 'all' ||
-        (selectedStatusFilter === 'expired' && app.status === 'expired') ||
-        app.status === selectedStatusFilter;
+    const list =
+      activeTab === 'self'
+        ? selfAppointments
+        : activeTab === 'family'
+        ? dependentAppointments
+        : [];
 
-      // Search filtering
+    return list.filter((app) => {
+      const effectiveStatus = getEffectiveAppointmentStatus(app);
+      const matchesStatus =
+        selectedStatus === 'all' || effectiveStatus === selectedStatus;
+
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch =
         !q ||
@@ -85,89 +146,70 @@ export const AppointmentsScreen: React.FC = () => {
 
       return matchesStatus && matchesSearch;
     });
-  }, [activeTab, selfAppointments, dependentAppointments, searchQuery, selectedStatusFilter]);
+  }, [activeTab, selfAppointments, dependentAppointments, searchQuery, selectedStatus]);
 
-  const handleCancelAppointment = (appointment: Appointment) => {
-    const scheduledDate = new Date(`${appointment.appointment_date}T${appointment.time_slot}`);
-    const now = new Date();
-    const hoursRemaining = (scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+  const activeStatusObj =
+    STATUS_OPTIONS.find((s) => s.key === selectedStatus) || STATUS_OPTIONS[0];
 
-    const isCashlessPaid = appointment.payment_method === 'Cashless' && appointment.payment_status === 'paid';
-    const isUnder24Hours = hoursRemaining < 24 && hoursRemaining >= 0;
-
-    let feeNotice = 'Free cancellation is available for this booking.';
-    if (isCashlessPaid) {
-      feeNotice = isUnder24Hours
-        ? 'Notice: Since you are canceling within 24 hours of your schedule, a 50% administrative cancellation fee applies (50% will be refunded).'
-        : 'Notice: Canceling more than 24 hours in advance qualifies your paid cashless booking for a 100% full refund.';
-    }
-
-    Alert.alert(
-      'Cancel Appointment?',
-      `Are you sure you want to cancel Appointment #${appointment.id}?\n\n${feeNotice}`,
-      [
-        { text: 'Keep Appointment', style: 'cancel' },
-        {
-          text: 'Confirm Cancellation',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setLoading(true);
-              const res = await appointmentsApi.cancelAppointment(appointment.id);
-              if (res.success) {
-                Alert.alert('Canceled', res.message || 'Appointment successfully canceled.');
-                fetchAppointments();
-              }
-            } catch (err) {
-              Alert.alert('Error', 'Could not cancel appointment. Please try again.');
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
+  const handlePromptCancel = (app: Appointment) => {
+    setConfirmModalConfig({
+      visible: true,
+      title: 'Cancel Appointment',
+      message: `Are you sure you want to cancel? This time block will be reopened.`,
+      confirmText: 'Cancel',
+      cancelText: 'Keep',
+      icon: 'close-circle-outline',
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          const res = await appointmentsApi.cancelAppointment(app.id);
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+          setSuccessModalConfig({
+            visible: true,
+            title: 'Appointment Canceled',
+            message: res.message || 'Your appointment booking has been successfully canceled.',
+          });
+          fetchAppointments();
+        } catch {
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   };
 
-  const handleDeleteExpired = (appointment: Appointment) => {
-    Alert.alert(
-      'Remove Expired Record?',
-      'Are you sure you want to remove this expired appointment from your dashboard view?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await appointmentsApi.softDeleteAppointment(appointment.id);
-              fetchAppointments();
-            } catch {
-              Alert.alert('Error', 'Could not remove expired record.');
-            }
-          },
-        },
-      ]
-    );
+  const handlePromptDeleteExpired = (app: Appointment) => {
+    setConfirmModalConfig({
+      visible: true,
+      title: 'Remove Record',
+      message: `Remove expired appointment from your patient appointment history?`,
+      confirmText: 'Remove',
+      cancelText: 'Keep',
+      icon: 'trash-outline',
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          await appointmentsApi.softDeleteAppointment(app.id);
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+          setSuccessModalConfig({
+            visible: true,
+            title: 'Record Removed',
+            message: 'Expired appointment record has been removed.',
+          });
+          fetchAppointments();
+        } catch {
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   };
-
-  const statusFilters: Array<{ key: string; label: string }> = [
-    { key: 'all', label: 'ALL' },
-    { key: 'pending', label: 'PENDING' },
-    { key: 'approved', label: 'APPROVED' },
-    { key: 'retest', label: 'RETEST' },
-    { key: 'tested', label: 'TESTED' },
-    { key: 'released', label: 'RELEASED' },
-    { key: 'returned', label: 'RETURNED' },
-    { key: 'canceled', label: 'CANCELED' },
-    { key: 'expired', label: 'EXPIRED' },
-  ];
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bgMain }]}>
       <Header
-        title="Appointments"
-        subtitle="Manage Schedules & Status"
         rightAction={
           <TouchableOpacity
             onPress={() => navigation.navigate('CreateAppointment')}
@@ -180,7 +222,16 @@ export const AppointmentsScreen: React.FC = () => {
       />
 
       <View style={styles.container}>
-        {/* Navigation Category Pills */}
+        <View style={styles.pageTitleBlock}>
+          <Text style={[styles.pageMainTitle, { color: theme.brandAccent }]}>
+            MY APPOINTMENTS
+          </Text>
+          <Text style={[styles.pageSubtitle, { color: theme.textMuted }]}>
+            Manage schedules, review status, and track clinical results.
+          </Text>
+        </View>
+
+        {/* Category Tabs */}
         <View style={styles.tabPillsRow}>
           <TouchableOpacity
             onPress={() => setActiveTab('self')}
@@ -232,95 +283,79 @@ export const AppointmentsScreen: React.FC = () => {
                 styles.tabPillText,
                 { color: activeTab === 'bulk' ? '#1C232D' : theme.textMuted },
               ]}>
-              Corporate / Bulk
+              Bulk
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Search Input */}
+        {/* Search Bar */}
         <Input
           placeholder="Search by ID, name, or examination..."
           value={searchQuery}
           onChangeText={setSearchQuery}
-          containerStyle={{ marginBottom: Spacing.sm }}
+          containerStyle={{ marginBottom: Spacing.xs }}
         />
 
-        {/* Status Filter Horizontal Scroll */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.statusFilterScroll}>
-          {statusFilters.map((sf) => (
-            <TouchableOpacity
-              key={sf.key}
-              onPress={() => setSelectedStatusFilter(sf.key)}
-              style={[
-                styles.filterPill,
-                {
-                  backgroundColor:
-                    selectedStatusFilter === sf.key ? theme.brandAccent : theme.bgCard,
-                  borderColor:
-                    selectedStatusFilter === sf.key ? theme.brandAccent : theme.borderColor,
-                },
-              ]}>
-              <Text
-                style={[
-                  styles.filterPillText,
-                  { color: selectedStatusFilter === sf.key ? '#1C232D' : theme.textMuted },
-                ]}>
-                {sf.label}
+        {/* Status Filter */}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => setStatusDropdownVisible(true)}
+          style={[
+            styles.dropdownTrigger,
+            { backgroundColor: theme.bgCard, borderColor: theme.borderColor },
+          ]}>
+          <View style={styles.dropdownLeft}>
+            <Ionicons
+              name="funnel-outline"
+              size={16}
+              color={theme.brandAccent}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={[styles.dropdownLabel, { color: theme.textMuted }]}>Status:</Text>
+            <View style={[styles.statusBadgePreview, { borderColor: activeStatusObj.color }]}>
+              <View style={[styles.statusDot, { backgroundColor: activeStatusObj.color }]} />
+              <Text style={[styles.statusBadgeText, { color: theme.textMain }]}>
+                {activeStatusObj.label}
               </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+            </View>
+          </View>
+          <Ionicons name="chevron-down" size={16} color={theme.textMuted} />
+        </TouchableOpacity>
 
-        {/* Appointments List View */}
+        {/* List Content */}
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={theme.brandAccent} />
-            <Text style={[styles.loadingText, { color: theme.textMuted }]}>
-              Loading appointment schedules...
-            </Text>
           </View>
         ) : activeTab === 'bulk' ? (
-          /* Locked Bulk Tab Notice */
           <Card style={styles.lockedBulkCard}>
             <Ionicons name="business-outline" size={48} color={theme.warning} />
             <Text style={[styles.lockedTitle, { color: theme.textMain }]}>
-              Corporate & Bulk Appointments
+              Bulk Portal
             </Text>
             <Text style={[styles.lockedMessage, { color: theme.textMuted }]}>
-              Batch bookings and company spreadsheet compilations are managed exclusively through our web portal for administrative verification and bulk billing.
+              Bulk spreadsheet imports and reservations are exclusive to the web portal.
             </Text>
             <Button
-              title="Open Web Portal"
-              variant="primary"
-              size="md"
-              icon={<Ionicons name="open-outline" size={16} color="#1C232D" />}
-              onPress={alertBulkWebExclusive}
+              title="Open Website"
+              size="sm"
+              onPress={() => setBulkRedirectModalVisible(true)}
               style={{ marginTop: Spacing.md }}
             />
           </Card>
         ) : currentList.length === 0 ? (
           <Card style={styles.emptyCard}>
-            <Ionicons name="calendar-clear-outline" size={44} color={theme.textMuted} />
-            <Text style={[styles.emptyTitle, { color: theme.textMain }]}>
-              No Bookings Found
-            </Text>
+            <Ionicons name="calendar-clear-outline" size={40} color={theme.textMuted} />
+            <Text style={[styles.emptyTitle, { color: theme.textMain }]}>No Bookings</Text>
             <Text style={[styles.emptySubtitle, { color: theme.textMuted }]}>
-              {searchQuery || selectedStatusFilter !== 'all'
-                ? 'No appointments match your filters.'
-                : 'You have no scheduled appointments in this category.'}
+              No appointments found with current filters.
             </Text>
-            <Button
-              title="Book New Appointment"
-              size="sm"
-              onPress={() => navigation.navigate('CreateAppointment')}
-              style={{ marginTop: Spacing.md }}
-            />
           </Card>
         ) : (
           <ScrollView
+            ref={scrollViewRef}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContent}
             refreshControl={
@@ -335,23 +370,171 @@ export const AppointmentsScreen: React.FC = () => {
               <AppointmentCard
                 key={app.id}
                 appointment={app}
-                onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: app.id })}
-                onResubmit={() => navigation.navigate('ResubmitAppointment', { appointmentId: app.id })}
-                onCancel={() => handleCancelAppointment(app)}
-                onDeleteExpired={() => handleDeleteExpired(app)}
-                onViewResult={() => navigation.navigate('AppointmentDetail', { appointmentId: app.id })}
+                onPress={() =>
+                  navigation.navigate('AppointmentDetail', { appointmentId: app.id })
+                }
+                onResubmit={() =>
+                  navigation.navigate('ResubmitAppointment', { appointmentId: app.id })
+                }
+                onCancel={() => handlePromptCancel(app)}
+                onDeleteExpired={() => handlePromptDeleteExpired(app)}
+                onViewResult={() =>
+                  navigation.navigate('AppointmentDetail', { appointmentId: app.id })
+                }
+                onPreviewReferral={() => {
+                  if (app.referral_note) {
+                    setPreviewTitle(`Referral: REF #${app.id}`);
+                    setPreviewUri(app.referral_note);
+                    setLightboxVisible(true);
+                  }
+                }}
+                onPreviewReceipt={() => {
+                  if (app.payment_receipt) {
+                    setPreviewTitle(`Receipt: REF #${app.id}`);
+                    setPreviewUri(app.payment_receipt);
+                    setLightboxVisible(true);
+                  }
+                }}
               />
             ))}
           </ScrollView>
         )}
       </View>
+
+      <ScrollShortcutButton
+        scrollViewRef={scrollViewRef}
+        contentOffsetY={contentOffsetY}
+        contentHeight={contentHeight}
+        layoutHeight={layoutHeight}
+      />
+
+      {/* UNIFIED MODAL: External Bulk Website Redirection */}
+      <ActionModal
+        visible={bulkRedirectModalVisible}
+        type="info"
+        icon="globe-outline"
+        title="Open Web Portal"
+        message="Bulk spreadsheet imports, employee list verification, and enterprise bookings are managed on our official website. Proceed to open in your browser?"
+        confirmText="Visit Portal"
+        cancelText="Stay Here"
+        confirmVariant="primary"
+        onClose={() => setBulkRedirectModalVisible(false)}
+        onConfirm={() => {
+          setBulkRedirectModalVisible(false);
+          openWebUrl(EXTERNAL_ROUTES.BULK_APPOINTMENT);
+        }}
+      />
+
+      {/* UNIFIED MODAL: Confirmation for Cancel / Delete */}
+      <ActionModal
+        visible={confirmModalConfig.visible}
+        type="danger"
+        title={confirmModalConfig.title}
+        message={confirmModalConfig.message}
+        confirmText={confirmModalConfig.confirmText}
+        cancelText={confirmModalConfig.cancelText}
+        icon={confirmModalConfig.icon}
+        loading={actionLoading}
+        onClose={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
+        onConfirm={confirmModalConfig.onConfirm}
+      />
+
+      {/* UNIFIED MODAL: Action Success Acknowledgement */}
+      <ActionModal
+        visible={successModalConfig.visible}
+        type="success"
+        title={successModalConfig.title}
+        message={successModalConfig.message}
+        isSingleAction={true}
+        confirmText="OK"
+        onClose={() => setSuccessModalConfig((prev) => ({ ...prev, visible: false }))}
+      />
+
+      {/* Status Filter Modal */}
+      <Modal
+        visible={statusDropdownVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStatusDropdownVisible(false)}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setStatusDropdownVisible(false)}
+          style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.dropdownModalCard,
+              { backgroundColor: theme.bgCard, borderColor: theme.borderColor },
+            ]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textMain }]}>
+                Filter Appointments by Status
+              </Text>
+              <TouchableOpacity onPress={() => setStatusDropdownVisible(false)} hitSlop={10}>
+                <Ionicons name="close" size={20} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+              {STATUS_OPTIONS.map((item) => {
+                const isSelected = selectedStatus === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    onPress={() => {
+                      setSelectedStatus(item.key);
+                      setStatusDropdownVisible(false);
+                    }}
+                    style={[
+                      styles.statusOptionRow,
+                      {
+                        backgroundColor: isSelected ? theme.surfaceSubtle : 'transparent',
+                        borderBottomColor: theme.borderColor,
+                      },
+                    ]}>
+                    <View style={styles.optionLeft}>
+                      <View style={[styles.statusDot, { backgroundColor: item.color }]} />
+                      <Text
+                        style={[
+                          styles.optionLabel,
+                          {
+                            color: isSelected ? theme.brandAccent : theme.textMain,
+                            fontWeight: isSelected ? '800' : '600',
+                          },
+                        ]}>
+                        {item.label}
+                      </Text>
+                    </View>
+                    {isSelected && <Ionicons name="checkmark" size={18} color={theme.brandAccent} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Lightbox Modal */}
+      <LightboxModal
+        visible={lightboxVisible}
+        onClose={() => setLightboxVisible(false)}
+        title={previewTitle}
+        imageUri={previewUri}
+        downloadUrl={previewUri}
+      />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  container: { flex: 1, padding: Spacing.md },
+  container: { flex: 1, paddingHorizontal: Spacing.md },
+  pageTitleBlock: { marginVertical: Spacing.sm },
+  pageMainTitle: {
+    fontSize: Typography.sizes.lg,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  pageSubtitle: { fontSize: Typography.sizes.xs, marginTop: 2 },
   bookHeaderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -364,25 +547,45 @@ const styles = StyleSheet.create({
   tabPillsRow: { flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.sm },
   tabPill: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderRadius: BorderRadius.md,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tabPillText: { fontSize: Typography.sizes.xs - 1, fontWeight: '800', textTransform: 'uppercase' },
-  statusFilterScroll: { paddingVertical: Spacing.xs, marginBottom: Spacing.sm, gap: Spacing.xs },
-  filterPill: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+  tabPillText: {
+    fontSize: Typography.sizes.xs - 2,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md,
+    height: 42,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginBottom: Spacing.sm,
+  },
+  dropdownLeft: { flexDirection: 'row', alignItems: 'center' },
+  dropdownLabel: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  statusBadgePreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     borderRadius: BorderRadius.pill,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 4,
   },
-  filterPillText: { fontSize: Typography.sizes.xs - 2, fontWeight: '800' },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusBadgeText: { fontSize: Typography.sizes.xs - 1, fontWeight: '800' },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  loadingText: { fontSize: Typography.sizes.xs, marginTop: Spacing.sm },
   listContent: { paddingBottom: 40 },
   emptyCard: {
     padding: Spacing.xl,
@@ -391,26 +594,67 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xl,
     borderStyle: 'dashed',
   },
-  emptyTitle: { fontSize: Typography.sizes.md, fontWeight: '800', textTransform: 'uppercase', marginTop: Spacing.sm },
-  emptySubtitle: { fontSize: Typography.sizes.xs, textAlign: 'center', marginTop: 4, lineHeight: 18 },
+  emptyTitle: {
+    fontSize: Typography.sizes.sm,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    marginTop: Spacing.xs,
+  },
+  emptySubtitle: { fontSize: Typography.sizes.xs, textAlign: 'center', marginTop: 4 },
   lockedBulkCard: {
     padding: Spacing.xl,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: Spacing.xl,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 193, 7, 0.3)',
   },
   lockedTitle: {
-    fontSize: Typography.sizes.md,
-    fontWeight: '900',
+    fontSize: Typography.sizes.sm,
+    fontWeight: '800',
     textTransform: 'uppercase',
-    marginTop: Spacing.sm,
+    marginTop: Spacing.xs,
   },
   lockedMessage: {
     fontSize: Typography.sizes.xs,
     textAlign: 'center',
-    marginTop: Spacing.xs,
+    marginTop: 4,
     lineHeight: 18,
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    padding: Spacing.lg,
+  },
+  dropdownModalCard: {
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1.5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+    paddingBottom: Spacing.xs,
+  },
+  modalTitle: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  statusOptionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.sm,
+    borderBottomWidth: 1,
+    borderRadius: BorderRadius.sm,
+  },
+  optionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  optionLabel: { fontSize: Typography.sizes.xs },
 });

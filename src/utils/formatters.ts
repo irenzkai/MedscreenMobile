@@ -1,9 +1,79 @@
-import { AppointmentStatus, StatusColors } from '../types';
+import { Appointment, AppointmentStatus } from '../types';
 import { StatusColors as ThemeStatusColors } from '../constants/theme';
+import { calculateAge } from './validators';
+export { calculateAge } from './validators';
 
 // ============================================================================
 // Medscreen Patient Portal - Text & Data Formatters
 // ============================================================================
+
+/**
+ * Calculates whether an appointment has dynamically expired (24-hour unprogressed rule).
+ */
+export function isAppointmentExpired(appointment: Appointment): boolean {
+  if (['retest', 'tested', 'encoded', 'released'].includes(appointment.status)) {
+    return false;
+  }
+  if (appointment.status === 'expired') {
+    return true;
+  }
+  if (!appointment.appointment_date) {
+    return false;
+  }
+
+  try {
+    const dateStr = appointment.appointment_date.split('T')[0];
+    const timeStr = appointment.time_slot || '00:00:00';
+    const scheduled = new Date(`${dateStr}T${timeStr}`);
+    if (isNaN(scheduled.getTime())) return false;
+
+    // Matching Laravel Carbon rule: now > scheduledAt + 24 hours
+    const expiryTimestamp = scheduled.getTime() + 24 * 60 * 60 * 1000;
+    return Date.now() > expiryTimestamp;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolves the effective clinical status of an appointment, accounting for dynamic expiration.
+ */
+export function getEffectiveAppointmentStatus(appointment: Appointment): AppointmentStatus {
+  if (isAppointmentExpired(appointment)) {
+    return 'expired';
+  }
+  return appointment.status;
+}
+
+/**
+ * Reliably calculates the patient age from the appointment snapshot or parent/dependent birthdates.
+ * Solves the " Years Old with no number" bug.
+ */
+export function calculatePatientAge(appointment: Appointment): string {
+  // If numeric age is provided by the server, use it
+  if (
+    appointment.patient_age !== undefined &&
+    appointment.patient_age !== null &&
+    String(appointment.patient_age).trim() !== '' &&
+    appointment.patient_age !== 'N/A'
+  ) {
+    return `${appointment.patient_age} Years Old`;
+  }
+
+  // Calculate age from birthdate fallback chain
+  const rawBirthdate =
+    appointment.patient_birthdate ||
+    appointment.dependent?.birthdate;
+
+  if (rawBirthdate) {
+    const age = calculateAge(rawBirthdate);
+    if (age >= 0) {
+      return `${age} Years Old`;
+    }
+  }
+
+  return 'Age Not Specified';
+}
 
 /**
  * Formats a monetary amount into Philippine Peso standard format (₱X,XXX.XX).
@@ -13,12 +83,14 @@ export function formatCurrency(amount: number | string | null | undefined): stri
     return '₱0.00';
   }
   const numeric = typeof amount === 'string' ? parseFloat(amount) : amount;
-  return '₱' + numeric.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '₱' + numeric.toLocaleString('en-PH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 /**
  * Composes a normalized, PSA-compliant full patient name representation.
- * Handles 'N/A' middle name fallbacks cleanly.
  */
 export function formatPatientName(
   firstName?: string | null,
@@ -36,11 +108,9 @@ export function formatPatientName(
 
   const parts = [f, m, l].filter(Boolean);
   let compiled = parts.join(' ');
-
   if (s) {
     compiled += ` ${s}`;
   }
-
   return compiled || 'NOT SPECIFIED';
 }
 
@@ -54,23 +124,18 @@ export function formatAddress(
   province?: string | null
 ): string {
   const parts: string[] = [];
-
   if (street && street.trim()) {
     parts.push(street.trim().toUpperCase());
   }
-
   if (barangay && barangay.trim() && !barangay.includes('Select')) {
     parts.push(`BRGY. ${barangay.trim().toUpperCase()}`);
   }
-
   if (city && city.trim() && !city.includes('Select')) {
     parts.push(city.trim().toUpperCase());
   }
-
   if (province && province.trim() && !province.includes('Select')) {
     parts.push(province.trim().toUpperCase());
   }
-
   return parts.join(', ') || 'Address Not Provided';
 }
 
@@ -80,7 +145,6 @@ export function formatAddress(
 export function formatDisplayPhone(rawPhone?: string | null): string {
   if (!rawPhone) return '';
   let cleaned = rawPhone.trim().replace(/[^0-9]/g, '');
-
   if (cleaned.startsWith('639')) {
     cleaned = cleaned.substring(3);
   } else if (cleaned.startsWith('09')) {
@@ -88,7 +152,6 @@ export function formatDisplayPhone(rawPhone?: string | null): string {
   } else if (cleaned.startsWith('9')) {
     cleaned = cleaned.substring(1);
   }
-
   return cleaned.substring(0, 9);
 }
 
@@ -141,7 +204,7 @@ export function formatTimeSlot(timeString?: string | null): string {
 }
 
 /**
- * Formats duration from minutes to human-readable string (e.g. 65 -> "1h 5m", 15 -> "15 mins").
+ * Formats duration from minutes to human-readable string (e.g. 65 -> "1h 5m").
  */
 export function formatDuration(minutes?: number | null): string {
   if (!minutes || minutes <= 0) return '5 mins';
@@ -182,7 +245,7 @@ export function formatRelativeTime(dateString?: string | null): string {
  * Returns complete styling metadata for an appointment status badge.
  */
 export function getStatusTheme(status: AppointmentStatus, isExpired = false) {
-  if (isExpired) {
+  if (isExpired || status === 'expired') {
     return ThemeStatusColors.expired;
   }
   return ThemeStatusColors[status] || ThemeStatusColors.pending;

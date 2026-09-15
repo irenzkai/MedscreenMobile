@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
+import { NoticeBox } from '../../components/common/NoticeBox';
 import { validateEmail } from '../../utils/validators';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 import { extractErrorMessage } from '../../services/api/client';
@@ -26,15 +27,37 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'ForgotPassword'>;
 export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const scrollViewRef = useRef<ScrollView | null>(null);
 
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState<number>(0);
   const [successStatus, setSuccessStatus] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  /**
+   * Helper: Sets error message and immediately teleports / scrolls
+   * the screen back to the very top so the NoticeBox is in direct view.
+   */
+  const showError = (msg: string) => {
+    setErrorMsg(msg);
+    setSuccessStatus(null);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 50);
+  };
+
+  const showSuccess = (msg: string) => {
+    setSuccessStatus(msg);
+    setErrorMsg(null);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 50);
+  };
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let timer: ReturnType<typeof setInterval>;
     if (cooldown > 0) {
       timer = setInterval(() => {
         setCooldown((prev) => prev - 1);
@@ -46,20 +69,22 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
   const handleSubmit = async () => {
     setErrorMsg(null);
     setSuccessStatus(null);
+    setEmailError(null);
 
     const emailErr = validateEmail(email);
     if (emailErr) {
-      setErrorMsg(emailErr);
+      setEmailError(emailErr);
+      showError(emailErr);
       return;
     }
 
     setLoading(true);
     try {
       const res = await authApi.forgotPassword({ email: email.trim() });
-      setSuccessStatus(res.status || 'We have emailed your password reset link!');
+      showSuccess(res.status || 'We have emailed your password reset link!');
       setCooldown(60); // 60s cooldown like web portal
     } catch (err) {
-      setErrorMsg(extractErrorMessage(err));
+      showError(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -70,42 +95,57 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.bgMain }]}>
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: Math.max(insets.top + Spacing.lg, 40), paddingBottom: insets.bottom + 20 },
+          {
+            paddingTop: Math.max(insets.top + Spacing.lg, 40),
+            paddingBottom: insets.bottom + 20,
+          },
         ]}
         keyboardShouldPersistTaps="handled">
         <Card style={styles.card}>
           <View style={[styles.iconCircle, { backgroundColor: theme.surfaceSubtle }]}>
             <Ionicons name="key-outline" size={32} color={theme.brandAccent} />
           </View>
-
           <Text style={[styles.title, { color: theme.textMain }]}>Forgot Password</Text>
           <Text style={[styles.subtitle, { color: theme.textMuted }]}>
-            Provide your registered email address below, and we will send a secure password reset link to your inbox.
+            Provide your registered email address below, and we will send a secure password
+            reset link to your inbox.
           </Text>
 
-          {successStatus && (
-            <View style={[styles.statusBox, { backgroundColor: 'rgba(25, 211, 140, 0.08)', borderColor: theme.success }]}>
-              <Ionicons name="checkmark-circle" size={18} color={theme.success} />
-              <Text style={[styles.statusText, { color: theme.success }]}>{successStatus}</Text>
-            </View>
-          )}
+          {/* Dynamic Success Notice */}
+          {successStatus ? (
+            <NoticeBox
+              type="success"
+              title="Reset Link Dispatched"
+              message={successStatus}
+              onClose={() => setSuccessStatus(null)}
+              style={{ marginBottom: Spacing.md }}
+            />
+          ) : null}
 
-          {errorMsg && (
-            <View style={[styles.statusBox, { backgroundColor: 'rgba(220, 53, 69, 0.08)', borderColor: theme.danger }]}>
-              <Ionicons name="alert-circle" size={18} color={theme.danger} />
-              <Text style={[styles.statusText, { color: theme.danger }]}>{errorMsg}</Text>
-            </View>
-          )}
+          {/* Dynamic In-Page Error Notice (Teleport Target at Top) */}
+          {errorMsg ? (
+            <NoticeBox
+              type="danger"
+              message={errorMsg}
+              onClose={() => setErrorMsg(null)}
+              style={{ marginBottom: Spacing.md }}
+            />
+          ) : null}
 
           <Input
             label="Registered Email"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(t) => {
+              setEmail(t);
+              if (emailError) setEmailError(null);
+            }}
             placeholder="example@gmail.com"
             keyboardType="email-address"
             autoCapitalize="none"
+            error={emailError}
             isRequired
           />
 
@@ -122,7 +162,12 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
             onPress={() => navigation.navigate('Login')}
             style={styles.backBtn}
             hitSlop={8}>
-            <Ionicons name="arrow-back" size={16} color={theme.brandAccent} style={{ marginRight: 4 }} />
+            <Ionicons
+              name="arrow-back"
+              size={16}
+              color={theme.brandAccent}
+              style={{ marginRight: 4 }}
+            />
             <Text style={[styles.backBtnText, { color: theme.brandAccent }]}>
               Back to Login
             </Text>
@@ -145,23 +190,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: Spacing.md,
   },
-  title: { fontSize: Typography.sizes.xl, fontWeight: '800', textTransform: 'uppercase' },
-  subtitle: { fontSize: Typography.sizes.xs, marginTop: 4, marginBottom: Spacing.lg, lineHeight: 18 },
-  statusBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    marginBottom: Spacing.md,
-    gap: Spacing.xs,
+  title: {
+    fontSize: Typography.sizes.xl,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
-  statusText: { fontSize: Typography.sizes.xs, fontWeight: '700', flex: 1 },
+  subtitle: {
+    fontSize: Typography.sizes.xs,
+    marginTop: 4,
+    marginBottom: Spacing.lg,
+    lineHeight: 18,
+  },
   backBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: Spacing.xl,
   },
-  backBtnText: { fontSize: Typography.sizes.xs, fontWeight: '800', textTransform: 'uppercase' },
+  backBtnText: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
 });

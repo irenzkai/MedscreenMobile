@@ -7,6 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { CompositeNavigationProp, useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
@@ -23,13 +24,17 @@ import { Appointment, Service } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
+import { ActionModal } from '../../components/common/ActionModal';
 import {
   formatCurrency,
   formatDate,
   formatTimeSlot,
   formatPatientName,
+  isAppointmentExpired,
+  getEffectiveAppointmentStatus,
 } from '../../utils/formatters';
-import { alertBulkWebExclusive } from '../../utils/externalLinks';
+import { openWebUrl } from '../../utils/externalLinks';
+import { EXTERNAL_ROUTES } from '../../constants/config';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
 type NavigationProp = CompositeNavigationProp<
@@ -42,14 +47,15 @@ export const DashboardScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp>();
   const { user } = useAuth();
-
   const [recentAppointments, setRecentAppointments] = useState<Appointment[]>([]);
   const [popularServices, setPopularServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Real-time clinical clock timer
+  // External site redirect modal
+  const [bulkRedirectModalVisible, setBulkRedirectModalVisible] = useState<boolean>(false);
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -61,16 +67,11 @@ export const DashboardScreen: React.FC = () => {
         appointmentsApi.getAppointments(),
         servicesApi.getServices(),
       ]);
-
-      // Combine and get latest 5 appointments
       const combined = [...appData.self, ...appData.dependents].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
       setRecentAppointments(combined.slice(0, 5));
-
-      // Select popular recommended services
-      const recommended = svcList.slice(0, 3);
-      setPopularServices(recommended);
+      setPopularServices(svcList.slice(0, 3));
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
     } finally {
@@ -104,7 +105,7 @@ export const DashboardScreen: React.FC = () => {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bgMain }]}>
-      {/* Top Clinical Header */}
+      {/* Top Header with Circular Logo */}
       <View
         style={[
           styles.topHeader,
@@ -117,14 +118,17 @@ export const DashboardScreen: React.FC = () => {
         <View style={styles.headerContent}>
           <View style={styles.brandingRow}>
             <View style={[styles.logoIconCircle, { borderColor: theme.brandAccent }]}>
-              <Ionicons name="fitness" size={20} color={theme.brandAccent} />
+              <Image
+                source={require('../../../assets/images/logo.jpg')}
+                style={styles.logoImage}
+                resizeMode="cover"
+              />
             </View>
             <Text style={styles.brandTitle}>
               MED<Text style={{ color: theme.brandAccent }}>SCREEN</Text>
             </Text>
           </View>
 
-          {/* Notifications Trigger */}
           <TouchableOpacity
             onPress={() => navigation.navigate('Notifications')}
             style={[styles.notifBtn, { backgroundColor: theme.bgCard }]}
@@ -144,29 +148,38 @@ export const DashboardScreen: React.FC = () => {
             colors={[theme.brandAccent]}
           />
         }>
-        {/* Welcome & Live Clock Banner */}
+        {/* Welcome Banner */}
         <Card style={styles.welcomeCard}>
           <View style={styles.welcomeRow}>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.welcomeSub, { color: theme.brandAccent }]}>PATIENT CARE PORTAL</Text>
+              <Text style={[styles.welcomeSub, { color: theme.brandAccent }]}>
+                PATIENT CARE PORTAL
+              </Text>
               <Text style={[styles.welcomeTitle, { color: theme.textMain }]}>
-                Welcome, <Text style={{ color: theme.brandAccent }}>{user?.first_name || 'Patient'}</Text>
+                Welcome,{' '}
+                <Text style={{ color: theme.brandAccent }}>
+                  {user?.first_name || 'Patient'}
+                </Text>
               </Text>
               <Text style={[styles.welcomeDesc, { color: theme.textMuted }]}>
                 Access real-time laboratory schedules and health records.
               </Text>
             </View>
             <View style={[styles.clockBox, { backgroundColor: theme.surfaceSubtle }]}>
-              <Text style={[styles.clockDate, { color: theme.textMuted }]}>{formattedDate}</Text>
-              <Text style={[styles.clockTime, { color: theme.brandAccent }]}>{formattedTime}</Text>
+              <Text style={[styles.clockDate, { color: theme.textMuted }]}>
+                {formattedDate}
+              </Text>
+              <Text style={[styles.clockTime, { color: theme.brandAccent }]}>
+                {formattedTime}
+              </Text>
             </View>
           </View>
         </Card>
 
-        {/* Quick Action Clinical Cards */}
+        {/* Quick Actions */}
         <Text style={[styles.sectionHeading, { color: theme.textMain }]}>Quick Actions</Text>
         <View style={styles.actionCardsGrid}>
-          {/* Card 1: New Booking */}
+          {/* New Booking */}
           <Card
             style={styles.actionCard}
             onPress={() => navigation.navigate('CreateAppointment')}>
@@ -183,7 +196,7 @@ export const DashboardScreen: React.FC = () => {
             </View>
           </Card>
 
-          {/* Card 2: Result Archive */}
+          {/* Result Archive */}
           <Card
             style={styles.actionCard}
             onPress={() => navigation.navigate('MedicalHistory')}>
@@ -200,7 +213,7 @@ export const DashboardScreen: React.FC = () => {
             </View>
           </Card>
 
-          {/* Card 3: Dependents */}
+          {/* Dependents */}
           <Card
             style={styles.actionCard}
             onPress={() => navigation.navigate('ManageDependents')}>
@@ -217,19 +230,19 @@ export const DashboardScreen: React.FC = () => {
             </View>
           </Card>
 
-          {/* Card 4: Bulk Appointments (Locked - Web Exclusive) */}
+          {/* Bulk (Unified Modal Redirect) */}
           <Card
             style={styles.actionCard}
-            onPress={alertBulkWebExclusive}>
+            onPress={() => setBulkRedirectModalVisible(true)}>
             <View style={[styles.actionIconWrap, { backgroundColor: 'rgba(255, 193, 7, 0.1)' }]}>
               <Ionicons name="business-outline" size={24} color={theme.warning} />
             </View>
             <View style={styles.lockedRow}>
-              <Text style={[styles.actionCardTitle, { color: theme.textMain }]}>Corporate / Bulk</Text>
+              <Text style={[styles.actionCardTitle, { color: theme.textMain }]}>Bulk</Text>
               <Ionicons name="lock-closed" size={12} color={theme.warning} />
             </View>
             <Text style={[styles.actionCardDesc, { color: theme.textMuted }]}>
-              Batch bookings are exclusive to our web portal.
+              Batch bookings are exclusive to the web portal.
             </Text>
             <View style={styles.actionArrow}>
               <Text style={[styles.actionCardLink, { color: theme.warning }]}>Web Only</Text>
@@ -238,7 +251,7 @@ export const DashboardScreen: React.FC = () => {
           </Card>
         </View>
 
-        {/* Recent Inquiries / Appointments Section */}
+        {/* Recent Inquiries Section */}
         <View style={styles.sectionHeaderRow}>
           <Text style={[styles.sectionHeading, { color: theme.textMain, marginBottom: 0 }]}>
             Recent Inquiries
@@ -264,37 +277,42 @@ export const DashboardScreen: React.FC = () => {
             />
           </Card>
         ) : (
-          recentAppointments.map((app) => (
-            <Card
-              key={app.id}
-              style={styles.recentItemCard}
-              onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: app.id })}>
-              <View style={styles.recentItemRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.recentPatientName, { color: theme.textMain }]} numberOfLines={1}>
-                    {formatPatientName(
-                      app.patient_first_name,
-                      app.patient_middle_name,
-                      app.patient_last_name,
-                      app.patient_suffix
-                    )}
-                  </Text>
-                  <Text style={[styles.recentTests, { color: theme.textMuted }]} numberOfLines={1}>
-                    {app.services?.map((s) => s.name).join(', ') || 'Diagnostic Tests'}
-                  </Text>
-                  <Text style={[styles.recentSchedule, { color: theme.brandAccent }]}>
-                    {formatDate(app.appointment_date)} at {formatTimeSlot(app.time_slot)}
-                  </Text>
+          recentAppointments.map((app) => {
+            const isExpired = isAppointmentExpired(app);
+            const effectiveStatus = getEffectiveAppointmentStatus(app);
+
+            return (
+              <Card
+                key={app.id}
+                style={styles.recentItemCard}
+                onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: app.id })}>
+                <View style={styles.recentItemRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.recentPatientName, { color: theme.textMain }]} numberOfLines={1}>
+                      {formatPatientName(
+                        app.patient_first_name,
+                        app.patient_middle_name,
+                        app.patient_last_name,
+                        app.patient_suffix
+                      )}
+                    </Text>
+                    <Text style={[styles.recentTests, { color: theme.textMuted }]} numberOfLines={1}>
+                      {app.services?.map((s) => s.name).join(', ') || 'Diagnostic Tests'}
+                    </Text>
+                    <Text style={[styles.recentSchedule, { color: theme.brandAccent }]}>
+                      {formatDate(app.appointment_date)} at {formatTimeSlot(app.time_slot)}
+                    </Text>
+                  </View>
+                  <View style={styles.recentItemRight}>
+                    <Badge status={effectiveStatus} isExpired={isExpired} size="sm" />
+                    <Text style={[styles.recentPrice, { color: theme.textMain }]}>
+                      {formatCurrency(app.payment_amount || 0)}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.recentItemRight}>
-                  <Badge status={app.status} isExpired={app.status === 'expired'} size="sm" />
-                  <Text style={[styles.recentPrice, { color: theme.textMain }]}>
-                    {formatCurrency(app.payment_amount || 0)}
-                  </Text>
-                </View>
-              </View>
-            </Card>
-          ))
+              </Card>
+            );
+          })
         )}
 
         {/* Recommended Tests Catalog Section */}
@@ -312,7 +330,7 @@ export const DashboardScreen: React.FC = () => {
             <View style={styles.recHeaderRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.recName, { color: theme.textMain }]}>{svc.name.toUpperCase()}</Text>
-                <Text style={[styles.recDesc, { color: theme.textMuted }]} numberOfLines={2}>
+                <Text style={[styles.recDesc, { color: theme.textMuted }]}>
                   {svc.description}
                 </Text>
               </View>
@@ -320,6 +338,7 @@ export const DashboardScreen: React.FC = () => {
                 {formatCurrency(svc.price)}
               </Text>
             </View>
+
             <View style={styles.recFooterRow}>
               <View style={[styles.sampleBadge, { backgroundColor: theme.surfaceSubtle }]}>
                 <Ionicons name="water-outline" size={12} color={theme.danger} />
@@ -337,6 +356,23 @@ export const DashboardScreen: React.FC = () => {
           </Card>
         ))}
       </ScrollView>
+
+      {/* UNIFIED MODAL: External Bulk Website Redirection */}
+      <ActionModal
+        visible={bulkRedirectModalVisible}
+        type="info"
+        icon="globe-outline"
+        title="Open Web Portal"
+        message="Bulk spreadsheet imports, employee list verification, and enterprise bookings are managed on our official website. Proceed to open in your browser?"
+        confirmText="Open Website"
+        cancelText="Stay in App"
+        confirmVariant="primary"
+        onClose={() => setBulkRedirectModalVisible(false)}
+        onConfirm={() => {
+          setBulkRedirectModalVisible(false);
+          openWebUrl(EXTERNAL_ROUTES.BULK_APPOINTMENT);
+        }}
+      />
     </View>
   );
 };
@@ -356,12 +392,18 @@ const styles = StyleSheet.create({
   },
   brandingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   logoIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1.5,
+    overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   brandTitle: { color: '#FFFFFF', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
   notifBtn: {

@@ -12,6 +12,34 @@ export interface ServiceItemProps {
   onToggle?: (service: Service) => void;
   selectable?: boolean;
   disabled?: boolean;
+  disabledReason?: string;
+}
+
+/**
+ * Returns required biological specimen, resolving missing API fields via clinical catalog defaults.
+ */
+function resolveSpecimenSample(service: Service): string {
+  if (service.sample_required && service.sample_required !== 'N/A') {
+    return service.sample_required;
+  }
+  const name = service.name.toUpperCase();
+  if (name.includes('URINE') || name.includes('URINALYSIS') || name.includes('DRUG TEST')) {
+    return 'Urine';
+  }
+  if (name.includes('STOOL') || name.includes('FECALYSIS')) {
+    return 'Stool';
+  }
+  if (name.includes('PREGNANCY TEST')) {
+    return 'Urine';
+  }
+  if (name.includes('PEDIA') || name.includes('PREGNANCY PACKAGE')) {
+    return 'Blood, Urine';
+  }
+  if (name.includes('X-RAY') || name.includes('XRAY') || name.includes('ECG') || name.includes('MEDICAL CERTIFICATE')) {
+    return 'N/A';
+  }
+  // Standard laboratory test default is blood sample
+  return 'Blood';
 }
 
 export const ServiceItem: React.FC<ServiceItemProps> = ({
@@ -20,6 +48,7 @@ export const ServiceItem: React.FC<ServiceItemProps> = ({
   onToggle,
   selectable = true,
   disabled = false,
+  disabledReason,
 }) => {
   const theme = useTheme();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -30,79 +59,143 @@ export const ServiceItem: React.FC<ServiceItemProps> = ({
     }
   };
 
+  const isFemaleOnly = service.gender_restriction === 'female';
+  const isMaleOnly = service.gender_restriction === 'male';
+  const specimenName = resolveSpecimenSample(service);
+
   return (
     <View
       style={[
-        styles.container,
+        styles.card,
         {
           backgroundColor: theme.bgCard,
-          borderColor: selected ? theme.brandAccent : theme.borderColor,
-          borderLeftColor: selected ? theme.brandAccent : theme.borderColor,
+          borderColor: disabled
+            ? theme.borderColor
+            : selected
+            ? theme.brandAccent
+            : theme.borderColor,
+          borderLeftColor: disabled
+            ? theme.borderColor
+            : selected
+            ? theme.brandAccent
+            : theme.borderColor,
           borderLeftWidth: selected ? 4 : 1,
+          opacity: disabled ? 0.6 : 1,
         },
       ]}>
-      {/* Top Clickable Bar */}
       <TouchableOpacity
         activeOpacity={disabled ? 1 : 0.75}
         onPress={handlePress}
         disabled={disabled}
         style={styles.mainRow}>
-        {/* Checkbox Icon */}
         {selectable && (
           <View
             style={[
               styles.checkbox,
               {
-                borderColor: selected ? theme.brandAccent : theme.borderColor,
-                backgroundColor: selected ? theme.brandAccent : 'transparent',
+                borderColor: disabled
+                  ? theme.borderColor
+                  : selected
+                  ? theme.brandAccent
+                  : theme.borderColor,
+                backgroundColor: disabled
+                  ? theme.surfaceSubtle
+                  : selected
+                  ? theme.brandAccent
+                  : 'transparent',
               },
             ]}>
-            {selected && <Ionicons name="checkmark" size={16} color="#1C232D" />}
+            {disabled ? (
+              <Ionicons name="lock-closed" size={12} color={theme.textMuted} />
+            ) : selected ? (
+              <Ionicons name="checkmark" size={16} color="#1C232D" />
+            ) : null}
           </View>
         )}
 
-        {/* Title, Badges, & Price */}
-        <View style={styles.titleArea}>
-          <Text style={[styles.serviceName, { color: theme.textMain }]} numberOfLines={2}>
+        <View style={styles.titleCol}>
+          <Text
+            style={[
+              styles.serviceName,
+              { color: disabled ? theme.textMuted : theme.textMain },
+            ]}>
             {service.name.toUpperCase()}
           </Text>
 
-          <View style={styles.badgeRow}>
-            {service.sample_required && service.sample_required !== 'N/A' && (
-              <View style={[styles.badge, { backgroundColor: theme.surfaceSubtle }]}>
-                <Ionicons name="water-outline" size={10} color={theme.danger} />
-                <Text style={[styles.badgeText, { color: theme.textMuted }]}>
-                  {service.sample_required}
+          <View style={styles.badgesRow}>
+            {/* Gender Badge */}
+            {isFemaleOnly ? (
+              <View
+                style={[
+                  styles.genderBadge,
+                  { backgroundColor: 'rgba(233, 30, 99, 0.1)', borderColor: '#E91E63' },
+                ]}>
+                <Ionicons name="female" size={11} color="#E91E63" />
+                <Text style={[styles.genderText, { color: '#E91E63' }]}>FEMALE ONLY</Text>
+              </View>
+            ) : isMaleOnly ? (
+              <View
+                style={[
+                  styles.genderBadge,
+                  { backgroundColor: 'rgba(33, 150, 243, 0.1)', borderColor: '#2196F3' },
+                ]}>
+                <Ionicons name="male" size={11} color="#2196F3" />
+                <Text style={[styles.genderText, { color: '#2196F3' }]}>MALE ONLY</Text>
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.genderBadge,
+                  { backgroundColor: theme.surfaceSubtle, borderColor: theme.brandAccent },
+                ]}>
+                <Ionicons name="people" size={11} color={theme.brandAccent} />
+                <Text style={[styles.genderText, { color: theme.brandAccent }]}>
+                  ALL GENDERS
                 </Text>
               </View>
             )}
 
-            <View style={[styles.badge, { backgroundColor: theme.surfaceSubtle }]}>
-              <Ionicons name="time-outline" size={10} color={theme.brandAccent} />
-              <Text style={[styles.badgeText, { color: theme.textMuted }]}>
+            {/* Specimen Required Badge */}
+            {specimenName !== 'N/A' && (
+              <View style={[styles.specimenBadge, { backgroundColor: theme.surfaceSubtle }]}>
+                <Ionicons name="water" size={11} color={theme.danger} />
+                <Text style={[styles.specimenText, { color: theme.textMain }]}>
+                  {specimenName}
+                </Text>
+              </View>
+            )}
+
+            {/* Duration Badge */}
+            <View style={[styles.timeBadge, { backgroundColor: theme.surfaceSubtle }]}>
+              <Ionicons name="time-outline" size={11} color={theme.brandAccent} />
+              <Text style={[styles.timeText, { color: theme.textMuted }]}>
                 {formatDuration(service.estimated_time)}
               </Text>
             </View>
-
-            {service.gender_restriction !== 'both' && (
-              <View style={[styles.badge, { backgroundColor: 'rgba(255, 193, 7, 0.1)' }]}>
-                <Text style={[styles.badgeText, { color: theme.warning }]}>
-                  {service.gender_restriction === 'male' ? 'Male Only' : 'Female Only'}
-                </Text>
-              </View>
-            )}
           </View>
+
+          {disabled && disabledReason && (
+            <View style={styles.restrictionNotice}>
+              <Ionicons name="alert-circle" size={12} color={theme.warning} />
+              <Text style={[styles.restrictionText, { color: theme.warning }]}>
+                {disabledReason}
+              </Text>
+            </View>
+          )}
         </View>
 
-        {/* Price & Expand Drawer Trigger */}
-        <View style={styles.rightArea}>
-          <Text style={[styles.priceText, { color: theme.brandAccent }]}>
+        <View style={styles.priceCol}>
+          <Text
+            style={[
+              styles.priceText,
+              { color: disabled ? theme.textMuted : theme.brandAccent },
+            ]}>
             {formatCurrency(service.price)}
           </Text>
           <TouchableOpacity
-            hitSlop={8}
+            hitSlop={10}
             onPress={() => setIsExpanded((prev) => !prev)}
-            style={styles.expandTrigger}>
+            style={styles.expandChevron}>
             <Ionicons
               name={isExpanded ? 'chevron-up' : 'chevron-down'}
               size={18}
@@ -112,23 +205,31 @@ export const ServiceItem: React.FC<ServiceItemProps> = ({
         </View>
       </TouchableOpacity>
 
-      {/* Expandable Preparation & Description Drawer */}
       {isExpanded && (
-        <View style={[styles.drawer, { borderTopColor: theme.borderColor }]}>
+        <View
+          style={[
+            styles.drawer,
+            { borderTopColor: theme.borderColor, backgroundColor: theme.surfaceSubtle },
+          ]}>
           {service.description ? (
-            <Text style={[styles.descriptionText, { color: theme.textMuted }]}>
+            <Text style={[styles.descText, { color: theme.textMuted }]}>
               {service.description}
             </Text>
           ) : null}
 
           {service.preparation ? (
-            <View style={[styles.prepBox, { backgroundColor: theme.surfaceSubtle }]}>
-              <Ionicons name="information-circle-outline" size={14} color={theme.brandAccent} />
+            <View style={styles.prepRow}>
+              <Ionicons name="information-circle" size={15} color={theme.brandAccent} />
               <Text style={[styles.prepText, { color: theme.textMain }]}>
-                Prep: {service.preparation}
+                <Text style={{ fontWeight: '800' }}>Preparation: </Text>
+                {service.preparation}
               </Text>
             </View>
-          ) : null}
+          ) : (
+            <Text style={[styles.prepNone, { color: theme.textMuted }]}>
+              No special fasting or prior clinical preparation required.
+            </Text>
+          )}
         </View>
       )}
     </View>
@@ -136,8 +237,8 @@ export const ServiceItem: React.FC<ServiceItemProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    borderRadius: BorderRadius.md,
+  card: {
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
     marginBottom: Spacing.sm,
     overflow: 'hidden',
@@ -156,65 +257,104 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: Spacing.sm,
   },
-  titleArea: {
+  titleCol: {
     flex: 1,
-    paddingRight: Spacing.sm,
+    paddingRight: Spacing.xs,
   },
   serviceName: {
     fontSize: Typography.sizes.sm,
-    fontWeight: '800',
+    fontWeight: '900',
     letterSpacing: 0.5,
+    marginBottom: 6,
   },
-  badgeRow: {
+  badgesRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 4,
+    gap: 6,
   },
-  badge: {
+  genderBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: BorderRadius.sm,
-    gap: 3,
+    borderWidth: 1,
+    gap: 4,
   },
-  badgeText: {
-    fontSize: Typography.sizes.xs - 2,
+  genderText: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  specimenBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.sm,
+    gap: 4,
+  },
+  specimenText: {
+    fontSize: 10,
     fontWeight: '700',
   },
-  rightArea: {
+  timeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.sm,
+    gap: 4,
+  },
+  timeText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  restrictionNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+  },
+  restrictionText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  priceCol: {
     alignItems: 'flex-end',
     justifyContent: 'center',
+    paddingLeft: Spacing.xs,
   },
   priceText: {
-    fontSize: Typography.sizes.sm,
+    fontSize: Typography.sizes.md,
     fontWeight: '900',
   },
-  expandTrigger: {
+  expandChevron: {
     marginTop: 4,
     padding: 2,
   },
   drawer: {
     borderTopWidth: 1,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    padding: Spacing.md,
     gap: Spacing.xs,
   },
-  descriptionText: {
+  descText: {
     fontSize: Typography.sizes.xs,
     lineHeight: 18,
   },
-  prepBox: {
+  prepRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Spacing.xs,
-    borderRadius: BorderRadius.sm,
-    gap: Spacing.xs,
+    gap: 6,
+    marginTop: 2,
   },
   prepText: {
     fontSize: Typography.sizes.xs,
-    fontWeight: '600',
     flex: 1,
+    lineHeight: 16,
+  },
+  prepNone: {
+    fontSize: Typography.sizes.xs - 2,
+    fontStyle: 'italic',
   },
 });

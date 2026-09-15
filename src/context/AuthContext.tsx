@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { User, Sex } from '../types';
+import { User, Sex, Dependent } from '../types';
 import {
   apiClient,
   extractErrorMessage,
@@ -34,6 +34,23 @@ export interface AuthResponse {
   success: boolean;
   message?: string;
   deactivated?: boolean;
+  unverified?: boolean;
+}
+
+export interface PendingPromotionData {
+  promoteId: string;
+  initialData: {
+    firstName: string;
+    middleName?: string;
+    lastName: string;
+    suffix?: string;
+    birthdate: string;
+    sex: Sex;
+    province: string;
+    city: string;
+    barangay: string;
+    street: string;
+  };
 }
 
 interface AuthContextType {
@@ -42,9 +59,12 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   isEmailVerified: boolean;
+  pendingPromotionData: PendingPromotionData | null;
+  clearPendingPromotion: () => void;
   login: (email: string, password: string) => Promise<AuthResponse>;
   register: (payload: RegisterPayload) => Promise<AuthResponse>;
   logout: () => Promise<void>;
+  logoutAndRegister: (dependent: Dependent, parentUser?: User | null) => Promise<void>;
   sendOtp: (email?: string) => Promise<AuthResponse>;
   verifyOtp: (otp: string, email?: string) => Promise<AuthResponse>;
   changeUnverifiedEmail: (newEmail: string) => Promise<AuthResponse>;
@@ -60,14 +80,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [pendingPromotionData, setPendingPromotionData] = useState<PendingPromotionData | null>(null);
 
-  // Restore authenticated session on app cold boot
   useEffect(() => {
     const initializeAuth = async () => {
       try {
         const storedToken = await getStoredToken();
         const storedUserJson = await SecureStore.getItemAsync(USER_STORAGE_KEY);
-
         if (storedToken && storedUserJson) {
           setToken(storedToken);
           setUser(JSON.parse(storedUserJson));
@@ -78,17 +97,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsLoading(false);
       }
     };
-
     initializeAuth();
 
-    // Register 401 callback to reset state when server rejects token
     registerUnauthorizedListener(() => {
       setUser(null);
       setToken(null);
     });
   }, []);
 
-  // Persist updated user object to local secure storage
   const persistUser = async (updatedUser: User | null) => {
     setUser(updatedUser);
     if (updatedUser) {
@@ -98,23 +114,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Log In patient
-   */
+  const clearPendingPromotion = () => {
+    setPendingPromotionData(null);
+  };
+
   const login = async (email: string, password: string): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/login', {
         email: email.trim(),
         password,
       });
-
-      const { token: receivedToken, user: receivedUser } = response.data;
+      const { token: receivedToken, user: receivedUser, unverified } = response.data;
 
       if (receivedToken && receivedUser) {
         await setStoredToken(receivedToken);
         await persistUser(receivedUser);
         setToken(receivedToken);
-        return { success: true };
+
+        const isUnverified = unverified || !receivedUser.email_verified_at;
+        return {
+          success: true,
+          unverified: isUnverified,
+        };
       }
 
       return {
@@ -122,7 +143,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         message: response.data.message || 'Login failed. Please check your credentials.',
       };
     } catch (error: any) {
-      // Check for soft-deleted / deactivated user response
       if (
         error.response?.data?.errors?.deactivated ||
         error.response?.data?.deactivated
@@ -135,7 +155,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             'Your account is currently deactivated. You must reactivate it to log in.',
         };
       }
-
       return {
         success: false,
         message: extractErrorMessage(error),
@@ -143,23 +162,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Register new patient account
-   */
   const register = async (payload: RegisterPayload): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/register', payload);
       const { token: receivedToken, user: receivedUser } = response.data;
-
       if (receivedToken && receivedUser) {
         await setStoredToken(receivedToken);
         await persistUser(receivedUser);
         setToken(receivedToken);
-        return { success: true };
+        clearPendingPromotion();
+        return { success: true, unverified: true };
       }
-
+      clearPendingPromotion();
       return {
         success: true,
+        unverified: true,
         message: response.data?.message || 'Registration completed. Please verify your email.',
       };
     } catch (error) {
@@ -170,15 +187,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Dispatches a 6-digit email OTP for verification
-   */
   const sendOtp = async (email?: string): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/email/verification-otp', {
         email: email || user?.email,
       });
-
       return {
         success: true,
         message: response.data?.message || 'Verification code sent to your email.',
@@ -191,9 +204,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Verifies the 6-digit OTP code entered by the user
-   */
   const verifyOtp = async (otp: string, email?: string): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/verify-otp', {
@@ -202,7 +212,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
 
       if (response.data?.success) {
-        // Refresh local user verification state
         if (user) {
           const verifiedUser: User = {
             ...user,
@@ -215,7 +224,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           message: response.data?.message || 'Your email has been successfully verified!',
         };
       }
-
       return {
         success: false,
         message: response.data?.message || 'The entered code is incorrect or expired.',
@@ -228,15 +236,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Correct unverified email directly from the verification hub
-   */
   const changeUnverifiedEmail = async (newEmail: string): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/email/change', {
         email: newEmail.trim().toLowerCase(),
       });
-
       if (user) {
         const updatedUser: User = {
           ...user,
@@ -245,7 +249,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
         await persistUser(updatedUser);
       }
-
       return {
         success: true,
         message: response.data?.message || 'Email updated. A new code has been dispatched.',
@@ -258,9 +261,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Resend Reactivation OTP for soft-deleted account
-   */
   const sendReactivationOtp = async (): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/reactivate/resend-otp');
@@ -276,22 +276,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Verify Reactivation OTP and restore account session
-   */
   const verifyReactivationOtp = async (otp: string): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/reactivate/verify-otp', {
         otp: otp.trim(),
       });
-
       const { token: receivedToken, user: receivedUser } = response.data;
       if (receivedToken && receivedUser) {
         await setStoredToken(receivedToken);
         await persistUser(receivedUser);
         setToken(receivedToken);
       }
-
       return {
         success: true,
         message: response.data?.message || 'Welcome back! Your account has been reactivated.',
@@ -304,9 +299,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Fetch latest profile from backend database
-   */
   const refreshUserProfile = async (): Promise<void> => {
     try {
       const response = await apiClient.get('/profile');
@@ -318,9 +310,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  /**
-   * Log out patient
-   */
   const logout = async (): Promise<void> => {
     try {
       await apiClient.post('/logout');
@@ -331,6 +320,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(null);
       setToken(null);
     }
+  };
+
+  /**
+   * Promotes a dependent to an independent account by saving bio-data, logging out the parent,
+   * and queuing the registration view with prefilled parameters.
+   */
+  const logoutAndRegister = async (dep: Dependent, parentUser?: User | null): Promise<void> => {
+    const promotionPayload: PendingPromotionData = {
+      promoteId: String(dep.id),
+      initialData: {
+        firstName: dep.first_name || '',
+        middleName: dep.middle_name && dep.middle_name !== 'N/A' ? dep.middle_name : '',
+        lastName: dep.last_name || '',
+        suffix: dep.suffix || '',
+        birthdate: dep.birthdate ? dep.birthdate.split('T')[0] : '',
+        sex: dep.sex || 'Male',
+        province: dep.province || parentUser?.province || '',
+        city: dep.city || parentUser?.city || '',
+        barangay: dep.barangay || parentUser?.barangay || '',
+        street: dep.street || parentUser?.street || '',
+      },
+    };
+
+    setPendingPromotionData(promotionPayload);
+    await logout();
   };
 
   const isAuthenticated = !!token && !!user;
@@ -344,9 +358,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isLoading,
         isAuthenticated,
         isEmailVerified,
+        pendingPromotionData,
+        clearPendingPromotion,
         login,
         register,
         logout,
+        logoutAndRegister,
         sendOtp,
         verifyOtp,
         changeUnverifiedEmail,

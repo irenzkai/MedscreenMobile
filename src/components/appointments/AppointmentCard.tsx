@@ -11,6 +11,8 @@ import {
   formatDate,
   formatTimeSlot,
   formatPatientName,
+  isAppointmentExpired,
+  getEffectiveAppointmentStatus,
 } from '../../utils/formatters';
 import { BorderRadius, Spacing, Typography } from '../../constants/theme';
 
@@ -21,6 +23,8 @@ export interface AppointmentCardProps {
   onCancel?: () => void;
   onDeleteExpired?: () => void;
   onViewResult?: () => void;
+  onPreviewReferral?: () => void;
+  onPreviewReceipt?: () => void;
 }
 
 export const AppointmentCard: React.FC<AppointmentCardProps> = ({
@@ -30,32 +34,42 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
   onCancel,
   onDeleteExpired,
   onViewResult,
+  onPreviewReferral,
+  onPreviewReceipt,
 }) => {
   const theme = useTheme();
-  const isExpired = appointment.status === 'expired';
 
-  // Determine appointment category label
+  // Dynamically compute expiration matching the 24-hour server policy
+  const isExpired = isAppointmentExpired(appointment);
+  const effectiveStatus = getEffectiveAppointmentStatus(appointment);
+
   const isBulk = !!appointment.batch_id;
   const isDependent = !!appointment.dependent_id;
   const categoryLabel = isBulk ? 'BULK' : isDependent ? 'DEPENDENT' : 'PERSONAL';
 
-  // Determine allowed patient actions
   const canResubmit =
-    (appointment.status === 'returned' || appointment.status === 'canceled' || isExpired) &&
+    (effectiveStatus === 'returned' ||
+      effectiveStatus === 'canceled' ||
+      effectiveStatus === 'expired') &&
     appointment.status !== 'released';
 
   const canCancel =
-    ['pending', 'approved', 'returned'].includes(appointment.status) && !isExpired;
+    ['pending', 'approved', 'returned'].includes(effectiveStatus) && !isExpired;
 
-  const canDeleteExpired = isExpired && appointment.deleted_by_patient === false && appointment.payment_status !== 'paid';
-  const hasReleasedResults = appointment.status === 'released';
+  // Expired appointments can be deleted as long as payment is not actively paid (unpaid or refunded can be purged)
+  const canDeleteExpired =
+    isExpired &&
+    appointment.deleted_by_patient === false &&
+    appointment.payment_status !== 'paid';
+
+  const hasReleasedResults = effectiveStatus === 'released';
 
   return (
     <Card
       style={styles.cardContainer}
       variant={isExpired ? 'danger' : 'default'}
       onPress={onPress}>
-      {/* Card Header: Patient Name, Type Badge, & Clinical Status */}
+      {/* Header Row */}
       <View style={styles.headerRow}>
         <View style={styles.patientInfo}>
           <Text style={[styles.patientName, { color: theme.textMain }]} numberOfLines={1}>
@@ -75,7 +89,8 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
             </Text>
           </View>
         </View>
-        <Badge status={appointment.status} isExpired={isExpired} size="sm" />
+
+        <Badge status={effectiveStatus} isExpired={isExpired} size="sm" />
       </View>
 
       {/* Schedule & Tests Details */}
@@ -95,21 +110,63 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
             </Text>
           </View>
         )}
+
+        {/* Attachment Chips Preview */}
+        {(appointment.referral_note || appointment.payment_receipt) && (
+          <View style={styles.attachmentsRow}>
+            {appointment.referral_note ? (
+              <TouchableOpacity
+                onPress={onPreviewReferral}
+                style={[styles.attachmentChip, { backgroundColor: theme.surfaceSubtle }]}>
+                <Ionicons name="document-attach" size={12} color={theme.brandAccent} />
+                <Text style={[styles.attachmentChipText, { color: theme.brandAccent }]}>
+                  Referral Note
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {appointment.payment_receipt ? (
+              <TouchableOpacity
+                onPress={onPreviewReceipt}
+                style={[styles.attachmentChip, { backgroundColor: theme.surfaceSubtle }]}>
+                <Ionicons name="receipt-outline" size={12} color={theme.brandAccent} />
+                <Text style={[styles.attachmentChipText, { color: theme.brandAccent }]}>
+                  Receipt
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
       </View>
 
-      {/* Billing & Settlement Row */}
+      {/* Billing & Settlement Row with Refund State Handling */}
       <View style={[styles.billingRow, { backgroundColor: theme.surfaceSubtle }]}>
         <View>
           <Text style={[styles.billingLabel, { color: theme.textMuted }]}>
             Payment ({appointment.payment_method})
           </Text>
-          <Text
-            style={[
-              styles.paymentStatus,
-              { color: appointment.payment_status === 'paid' ? theme.success : theme.warning },
-            ]}>
-            {appointment.payment_status.toUpperCase()}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text
+              style={[
+                styles.paymentStatus,
+                {
+                  color:
+                    appointment.payment_status === 'paid'
+                      ? theme.success
+                      : appointment.payment_status === 'refunded'
+                      ? theme.info
+                      : theme.warning,
+                },
+              ]}>
+              {appointment.payment_status.toUpperCase()}
+            </Text>
+
+            {appointment.payment_status === 'refunded' && (
+              <View style={[styles.refundPill, { backgroundColor: 'rgba(13, 202, 240, 0.15)' }]}>
+                <Text style={[styles.refundPillText, { color: theme.info }]}>RETURNED</Text>
+              </View>
+            )}
+          </View>
         </View>
         <View style={styles.amountBox}>
           <Text style={[styles.amountText, { color: theme.brandAccent }]}>
@@ -118,12 +175,18 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
         </View>
       </View>
 
-      {/* Clinical Retest Notice Banner */}
-      {appointment.status === 'retest' && (
-        <View style={[styles.alertBanner, { backgroundColor: 'rgba(253, 126, 20, 0.08)', borderColor: theme.warning }]}>
+      {/* Retest Banner */}
+      {effectiveStatus === 'retest' && (
+        <View
+          style={[
+            styles.alertBanner,
+            { backgroundColor: 'rgba(253, 126, 20, 0.08)', borderColor: theme.warning },
+          ]}>
           <Ionicons name="alert-circle" size={16} color={theme.warning} />
           <View style={styles.alertContent}>
-            <Text style={[styles.alertTitle, { color: theme.warning }]}>Retesting Required</Text>
+            <Text style={[styles.alertTitle, { color: theme.warning }]}>
+              Retesting Required
+            </Text>
             <Text style={[styles.alertMessage, { color: theme.textMain }]}>
               Your sample requires recollection. Please visit the clinic.
             </Text>
@@ -132,11 +195,17 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
       )}
 
       {/* Return Reason Alert */}
-      {appointment.status === 'returned' && appointment.return_reason && (
-        <View style={[styles.alertBanner, { backgroundColor: 'rgba(220, 53, 69, 0.08)', borderColor: theme.danger }]}>
+      {effectiveStatus === 'returned' && appointment.return_reason && (
+        <View
+          style={[
+            styles.alertBanner,
+            { backgroundColor: 'rgba(220, 53, 69, 0.08)', borderColor: theme.danger },
+          ]}>
           <Ionicons name="alert-circle" size={16} color={theme.danger} />
           <View style={styles.alertContent}>
-            <Text style={[styles.alertTitle, { color: theme.danger }]}>Corrections Requested</Text>
+            <Text style={[styles.alertTitle, { color: theme.danger }]}>
+              Corrections Requested
+            </Text>
             <Text style={[styles.alertMessage, { color: theme.textMain }]} numberOfLines={2}>
               "{appointment.return_reason}"
             </Text>
@@ -144,7 +213,7 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
         </View>
       )}
 
-      {/* Action Toolbar */}
+      {/* Action Toolbar (NO Download on card) */}
       {(canResubmit || canCancel || canDeleteExpired || hasReleasedResults) && (
         <View style={styles.actionsRow}>
           {hasReleasedResults && onViewResult && (
@@ -250,6 +319,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
+  attachmentsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+  attachmentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.sm,
+  },
+  attachmentChipText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
   billingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -267,6 +354,16 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     fontWeight: '800',
     marginTop: 2,
+  },
+  refundPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: BorderRadius.pill,
+    marginTop: 2,
+  },
+  refundPillText: {
+    fontSize: 9,
+    fontWeight: '800',
   },
   amountBox: {
     alignItems: 'flex-end',

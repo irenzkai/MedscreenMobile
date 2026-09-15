@@ -34,14 +34,20 @@ export const Header: React.FC<HeaderProps> = ({
         },
       ]}>
       <View style={styles.contentRow}>
+        {/* Left Side: Back Arrow or Brand Logo */}
         {showBack ? (
           <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={10}>
             <Ionicons name="arrow-back" size={24} color={theme.brandAccent} />
           </TouchableOpacity>
         ) : (
           <View style={styles.brandingRow}>
+            {/* Circular Clipped Logo Image */}
             <View style={[styles.logoCircle, { borderColor: theme.brandAccent }]}>
-              <Ionicons name="fitness" size={20} color={theme.brandAccent} />
+              <Image
+                source={require('../../../assets/images/logo.jpg')}
+                style={styles.logoImage}
+                resizeMode="cover"
+              />
             </View>
             <Text style={styles.brandTitle}>
               MED<Text style={{ color: theme.brandAccent }}>SCREEN</Text>
@@ -49,19 +55,23 @@ export const Header: React.FC<HeaderProps> = ({
           </View>
         )}
 
-        {title && (
+        {/* Center Title (Only displayed on sub-screens when showBack is true) */}
+        {showBack && title ? (
           <View style={styles.titleWrapper}>
             <Text style={[styles.screenTitle, { color: '#FFFFFF' }]} numberOfLines={1}>
               {title}
             </Text>
-            {subtitle && (
+            {subtitle ? (
               <Text style={[styles.screenSubtitle, { color: theme.textMuted }]} numberOfLines={1}>
                 {subtitle}
               </Text>
-            )}
+            ) : null}
           </View>
+        ) : (
+          <View style={{ flex: 1 }} />
         )}
 
+        {/* Right Action */}
         <View style={styles.rightActionWrapper}>
           {rightAction ? rightAction : <View style={{ width: 36 }} />}
         </View>
@@ -73,7 +83,7 @@ export const Header: React.FC<HeaderProps> = ({
 const styles = StyleSheet.create({
   headerContainer: {
     paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
+    paddingBottom: Spacing.sm,
     borderBottomWidth: 1,
     zIndex: 100,
   },
@@ -81,7 +91,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 44,
+    height: 48,
   },
   backButton: {
     width: 36,
@@ -95,12 +105,18 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   logoCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1.5,
+    overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   brandTitle: {
     color: '#FFFFFF',
@@ -110,20 +126,22 @@ const styles = StyleSheet.create({
   },
   titleWrapper: {
     flex: 1,
-    paddingHorizontal: Spacing.sm,
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xs,
   },
   screenTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   screenSubtitle: {
-    fontSize: 11,
+    fontSize: 10,
     marginTop: 1,
   },
   rightActionWrapper: {
     alignItems: 'flex-end',
+    justifyContent: 'center',
     minWidth: 36,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  BackHandler,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,11 +17,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthStackParamList } from '../../navigation/AuthNavigator';
 import { useAuth, RegisterPayload } from '../../context/AuthContext';
 import { useTheme } from '../../hooks/useTheme';
-import { psgcApi } from '../../services/api/psgc';
-import { PSGCItem, Sex } from '../../types';
+import { Sex } from '../../types';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
+import { NoticeBox } from '../../components/common/NoticeBox';
+import { DatePickerModal } from '../../components/common/DatePickerModal';
+import { AddressSelector } from '../../components/common/AddressSelector';
+import {
+  ScrollShortcutButton,
+  useScrollShortcut,
+} from '../../components/common/ScrollShortcutButton';
 import {
   validateName,
   validateSuffix,
@@ -30,8 +37,9 @@ import {
   validatePassword,
   validatePasswordConfirmation,
   validateRequired,
+  calculateAge,
 } from '../../utils/validators';
-import { formatToStandardPhone } from '../../utils/formatters';
+import { formatToStandardPhone, formatDisplayPhone } from '../../utils/formatters';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
@@ -39,28 +47,34 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { register } = useAuth();
+  const { register, pendingPromotionData, clearPendingPromotion } = useAuth();
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const { contentOffsetY, contentHeight, layoutHeight, handleScroll } = useScrollShortcut();
 
   const [step, setStep] = useState<number>(1);
   const [loading, setLoading] = useState(false);
 
-  // Step 1: Identity
-  const [firstName, setFirstName] = useState('');
-  const [middleName, setMiddleName] = useState('');
-  const [noMiddleName, setNoMiddleName] = useState(false);
-  const [lastName, setLastName] = useState('');
-  const [suffix, setSuffix] = useState('');
-  const [birthdate, setBirthdate] = useState('');
-  const [sex, setSex] = useState<Sex>('Male');
+  // Extract prefilled values if routed from dependent account promotion
+  const promotionInitial = route.params?.initialData || pendingPromotionData?.initialData;
+  const promoteId = route.params?.promoteId || pendingPromotionData?.promoteId;
 
-  // Step 2: Address
-  const [provinces, setProvinces] = useState<PSGCItem[]>([]);
-  const [cities, setCities] = useState<PSGCItem[]>([]);
-  const [barangays, setBarangays] = useState<PSGCItem[]>([]);
-  const [selectedProvince, setSelectedProvince] = useState<PSGCItem | null>(null);
-  const [selectedCity, setSelectedCity] = useState<PSGCItem | null>(null);
-  const [selectedBarangay, setSelectedBarangay] = useState<string>('');
-  const [street, setStreet] = useState('');
+  // Step 1: Identity
+  const [firstName, setFirstName] = useState(promotionInitial?.firstName || '');
+  const [middleName, setMiddleName] = useState(
+    promotionInitial?.middleName === 'N/A' ? '' : promotionInitial?.middleName || ''
+  );
+  const [noMiddleName, setNoMiddleName] = useState(promotionInitial?.middleName === 'N/A');
+  const [lastName, setLastName] = useState(promotionInitial?.lastName || '');
+  const [suffix, setSuffix] = useState(promotionInitial?.suffix || '');
+  const [birthdate, setBirthdate] = useState(promotionInitial?.birthdate || '');
+  const [sex, setSex] = useState<Sex>(promotionInitial?.sex || 'Male');
+  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
+
+  // Step 2: Address (PSGC)
+  const [province, setProvince] = useState(promotionInitial?.province || '');
+  const [city, setCity] = useState(promotionInitial?.city || '');
+  const [barangay, setBarangay] = useState(promotionInitial?.barangay || '');
+  const [street, setStreet] = useState(promotionInitial?.street || '');
 
   // Step 3: Contact
   const [email, setEmail] = useState('');
@@ -70,31 +84,59 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  // Field validation and Step errors
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // Fetch initial provinces on mount
+  const showError = (msg: string) => {
+    setErrorBanner(msg);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 50);
+  };
+
+  /**
+   * Safe Back Action: Handles both multi-step navigation and stack back
+   * without crashing when Register is the root of the navigation stack.
+   */
+  const handleTopBackPress = () => {
+    if (step > 1) {
+      handleBack();
+    } else {
+      clearPendingPromotion();
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate('Login');
+      }
+    }
+  };
+
+  // Android Hardware Back Button Handler
   useEffect(() => {
-    psgcApi.getProvinces().then(setProvinces);
-  }, []);
+    const onHardwareBack = () => {
+      if (step > 1) {
+        handleBack();
+        return true;
+      }
+      if (!navigation.canGoBack()) {
+        clearPendingPromotion();
+        navigation.navigate('Login');
+        return true;
+      }
+      return false;
+    };
 
-  const handleProvinceSelect = async (p: PSGCItem) => {
-    setSelectedProvince(p);
-    setSelectedCity(null);
-    setSelectedBarangay('');
-    setBarangays([]);
-    const cList = await psgcApi.getCities(p.code);
-    setCities(cList);
-  };
-
-  const handleCitySelect = async (c: PSGCItem) => {
-    setSelectedCity(c);
-    setSelectedBarangay('');
-    const bList = await psgcApi.getBarangays(c.code);
-    setBarangays(bList);
-  };
+    const backHandlerSubscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      onHardwareBack
+    );
+    return () => backHandlerSubscription.remove();
+  }, [step]);
 
   const validateCurrentStep = (): boolean => {
     const errs: Record<string, string> = {};
+    setErrorBanner(null);
 
     if (step === 1) {
       const fnErr = validateName(firstName, 'First Name');
@@ -118,9 +160,9 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
       const bdayErr = validateBirthdate(birthdate, false);
       if (bdayErr) errs.birthdate = bdayErr;
     } else if (step === 2) {
-      if (!selectedProvince) errs.province = 'Province selection is required.';
-      if (!selectedCity) errs.city = 'City/Municipality is required.';
-      if (!selectedBarangay) errs.barangay = 'Barangay is required.';
+      if (!province.trim()) errs.province = 'Province selection is required.';
+      if (!city.trim()) errs.city = 'City / Municipality is required.';
+      if (!barangay.trim()) errs.barangay = 'Barangay is required.';
       const stErr = validateRequired(street, 'Street address');
       if (stErr) errs.street = stErr;
     } else if (step === 3) {
@@ -139,24 +181,35 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
     }
 
     setFieldErrors(errs);
-    return Object.keys(errs).length === 0;
+
+    if (Object.keys(errs).length > 0) {
+      showError('Please review the highlighted omissions below before continuing.');
+      return false;
+    }
+
+    return true;
   };
 
   const handleNext = () => {
     if (validateCurrentStep()) {
+      setErrorBanner(null);
+      setFieldErrors({});
       setStep((prev) => Math.min(prev + 1, 4));
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     }
   };
 
   const handleBack = () => {
+    setErrorBanner(null);
     setFieldErrors({});
     setStep((prev) => Math.max(prev - 1, 1));
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
   };
 
   const handleFinalSubmit = async () => {
     if (!validateCurrentStep()) return;
-
     setLoading(true);
+
     const payload: RegisterPayload = {
       first_name: firstName.trim().toUpperCase(),
       middle_name: noMiddleName ? 'N/A' : middleName.trim().toUpperCase() || 'N/A',
@@ -164,56 +217,88 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
       suffix: suffix.trim().toUpperCase() || null,
       birthdate: birthdate.trim(),
       sex,
-      province: selectedProvince?.name || '',
-      city: selectedCity?.name || '',
-      barangay: selectedBarangay,
+      province: province.trim().toUpperCase(),
+      city: city.trim().toUpperCase(),
+      barangay: barangay.trim().toUpperCase(),
       street: street.trim().toUpperCase(),
       email: email.trim().toLowerCase(),
       phone: formatToStandardPhone(phoneDisplay),
       password,
       password_confirmation: confirmPassword,
-      promoted_dependent_id: route.params?.promoteId ? Number(route.params.promoteId) : null,
-      shadow_appointment_id: route.params?.shadowAppointmentId ? Number(route.params.shadowAppointmentId) : null,
+      promoted_dependent_id: promoteId ? Number(promoteId) : null,
+      shadow_appointment_id: route.params?.shadowAppointmentId
+        ? Number(route.params.shadowAppointmentId)
+        : null,
     };
 
     const res = await register(payload);
     setLoading(false);
 
     if (res.success) {
+      clearPendingPromotion();
       Alert.alert(
         'Account Registered',
         'Your profile has been registered. Please verify your email with the 6-digit code sent to you.',
-        [{ text: 'Proceed to Verification', onPress: () => navigation.navigate('VerifyAccount', { email: payload.email }) }]
+        [
+          {
+            text: 'Proceed to Verification',
+            onPress: () => navigation.navigate('VerifyAccount', { email: payload.email }),
+          },
+        ]
       );
     } else {
-      Alert.alert('Registration Failed', res.message || 'Could not complete registration.');
+      showError(res.message || 'Could not complete registration. Please try again.');
     }
   };
 
   const labels = ['1. Identity', '2. Location', '3. Contact', '4. Security'];
+  const liveAge = birthdate ? calculateAge(birthdate) : null;
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.bgMain }]}>
       <ScrollView
+        ref={scrollViewRef}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: Math.max(insets.top + Spacing.sm, 24), paddingBottom: insets.bottom + 24 },
+          {
+            paddingTop: Math.max(insets.top + Spacing.sm, 24),
+            paddingBottom: insets.bottom + 24,
+          },
         ]}
         keyboardShouldPersistTaps="handled">
-        {/* Back Link */}
-        <TouchableOpacity
-          onPress={() => (step > 1 ? handleBack() : navigation.goBack())}
-          style={styles.topBackBtn}>
+        
+        {/* Top Back / Login Navigation Button */}
+        <TouchableOpacity onPress={handleTopBackPress} style={styles.topBackBtn}>
           <Ionicons name="arrow-back" size={20} color={theme.brandAccent} />
           <Text style={[styles.topBackText, { color: theme.brandAccent }]}>
             {step > 1 ? 'PREVIOUS STEP' : 'BACK TO LOGIN'}
           </Text>
         </TouchableOpacity>
 
+        {/* Dynamic Promotion Notice */}
+        {promoteId ? (
+          <NoticeBox
+            type="info"
+            title="Account Promotion Active"
+            message="Your existing medical records and clinical history will automatically transfer to this new profile once registered."
+            style={{ marginBottom: Spacing.md }}
+          />
+        ) : null}
+
+        {errorBanner ? (
+          <NoticeBox
+            type="danger"
+            message={errorBanner}
+            onClose={() => setErrorBanner(null)}
+            style={{ marginBottom: Spacing.md }}
+          />
+        ) : null}
+
         <Card style={styles.card}>
-          {/* Multi-Step Header & Progress */}
           <Text style={[styles.title, { color: theme.textMain }]}>Create Account</Text>
           <Text style={[styles.stepIndicator, { color: theme.brandAccent }]}>
             Step {step} of 4: {labels[step - 1]}
@@ -234,7 +319,10 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
               <Input
                 label="First Name"
                 value={firstName}
-                onChangeText={setFirstName}
+                onChangeText={(t) => {
+                  setFirstName(t);
+                  if (fieldErrors.firstName) setFieldErrors((prev) => ({ ...prev, firstName: '' }));
+                }}
                 placeholder="Given Name"
                 error={fieldErrors.firstName}
                 isRequired
@@ -250,7 +338,10 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
                     value={noMiddleName}
                     onValueChange={(val) => {
                       setNoMiddleName(val);
-                      if (val) setMiddleName('');
+                      if (val) {
+                        setMiddleName('');
+                        setFieldErrors((prev) => ({ ...prev, middleName: '' }));
+                      }
                     }}
                     thumbColor={noMiddleName ? theme.brandAccent : '#CCC'}
                   />
@@ -259,7 +350,10 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
               {!noMiddleName && (
                 <Input
                   value={middleName}
-                  onChangeText={setMiddleName}
+                  onChangeText={(t) => {
+                    setMiddleName(t);
+                    if (fieldErrors.middleName) setFieldErrors((prev) => ({ ...prev, middleName: '' }));
+                  }}
                   placeholder="Middle Name"
                   error={fieldErrors.middleName}
                 />
@@ -268,7 +362,10 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
               <Input
                 label="Last Name"
                 value={lastName}
-                onChangeText={setLastName}
+                onChangeText={(t) => {
+                  setLastName(t);
+                  if (fieldErrors.lastName) setFieldErrors((prev) => ({ ...prev, lastName: '' }));
+                }}
                 placeholder="Surname"
                 error={fieldErrors.lastName}
                 isRequired
@@ -277,22 +374,64 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
               <Input
                 label="Suffix (e.g. JR, SR, III)"
                 value={suffix}
-                onChangeText={setSuffix}
+                onChangeText={(t) => {
+                  setSuffix(t);
+                  if (fieldErrors.suffix) setFieldErrors((prev) => ({ ...prev, suffix: '' }));
+                }}
                 placeholder="Leave blank if none"
                 error={fieldErrors.suffix}
               />
 
-              <Input
-                label="Birthdate (YYYY-MM-DD)"
-                value={birthdate}
-                onChangeText={setBirthdate}
-                placeholder="YYYY-MM-DD"
-                helperText="You must be at least 18 years old to register."
-                error={fieldErrors.birthdate}
-                isRequired
-              />
+              <View style={styles.bdayFieldWrapper}>
+                <Text style={[styles.smallLabel, { color: theme.textMuted, marginBottom: 4 }]}>
+                  BIRTHDATE *
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setShowDatePicker(true)}
+                  style={[
+                    styles.bdayTrigger,
+                    {
+                      backgroundColor: theme.bgCard,
+                      borderColor: fieldErrors.birthdate ? theme.danger : theme.borderColor,
+                      borderWidth: fieldErrors.birthdate ? 1.5 : 1,
+                    },
+                  ]}>
+                  <Ionicons
+                    name="calendar"
+                    size={18}
+                    color={theme.brandAccent}
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text
+                    style={[
+                      styles.bdayTriggerText,
+                      { color: birthdate ? theme.textMain : theme.textMuted },
+                    ]}>
+                    {birthdate ? birthdate : 'Tap to Select Birthdate'}
+                  </Text>
+                  {liveAge !== null && (
+                    <View style={[styles.agePill, { backgroundColor: theme.surfaceSubtle }]}>
+                      <Text style={[styles.agePillText, { color: theme.brandAccent }]}>
+                        {liveAge} YRS OLD (ADULT)
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {fieldErrors.birthdate ? (
+                  <Text style={[styles.errorInline, { color: theme.danger }]}>
+                    {fieldErrors.birthdate}
+                  </Text>
+                ) : (
+                  <Text style={[styles.helperInline, { color: theme.textMuted }]}>
+                    Must be 18 years old or older to register.
+                  </Text>
+                )}
+              </View>
 
-              <Text style={[styles.smallLabel, { color: theme.textMuted, marginBottom: 6 }]}>SEX *</Text>
+              <Text style={[styles.smallLabel, { color: theme.textMuted, marginBottom: 6 }]}>
+                SEX *
+              </Text>
               <View style={styles.sexRow}>
                 {(['Male', 'Female'] as Sex[]).map((s) => (
                   <TouchableOpacity
@@ -321,113 +460,28 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
           {/* STEP 2: ADDRESS */}
           {step === 2 && (
             <View>
-              <Text style={[styles.smallLabel, { color: theme.textMuted }]}>PROVINCE *</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                {provinces.slice(0, 15).map((p) => (
-                  <TouchableOpacity
-                    key={p.code}
-                    onPress={() => handleProvinceSelect(p)}
-                    style={[
-                      styles.chip,
-                      {
-                        backgroundColor:
-                          selectedProvince?.code === p.code ? theme.brandAccent : theme.bgCard,
-                        borderColor:
-                          selectedProvince?.code === p.code ? theme.brandAccent : theme.borderColor,
-                      },
-                    ]}>
-                    <Text
-                      style={[
-                        styles.chipText,
-                        { color: selectedProvince?.code === p.code ? '#1C232D' : theme.textMain },
-                      ]}>
-                      {p.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              {fieldErrors.province && (
-                <Text style={[styles.errorInline, { color: theme.danger }]}>{fieldErrors.province}</Text>
-              )}
-
-              {selectedProvince && (
-                <>
-                  <Text style={[styles.smallLabel, { color: theme.textMuted, marginTop: Spacing.sm }]}>
-                    CITY / MUNICIPALITY *
-                  </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                    {cities.map((c) => (
-                      <TouchableOpacity
-                        key={c.code}
-                        onPress={() => handleCitySelect(c)}
-                        style={[
-                          styles.chip,
-                          {
-                            backgroundColor:
-                              selectedCity?.code === c.code ? theme.brandAccent : theme.bgCard,
-                            borderColor:
-                              selectedCity?.code === c.code ? theme.brandAccent : theme.borderColor,
-                          },
-                        ]}>
-                        <Text
-                          style={[
-                            styles.chipText,
-                            { color: selectedCity?.code === c.code ? '#1C232D' : theme.textMain },
-                          ]}>
-                          {c.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                  {fieldErrors.city && (
-                    <Text style={[styles.errorInline, { color: theme.danger }]}>{fieldErrors.city}</Text>
-                  )}
-                </>
-              )}
-
-              {selectedCity && (
-                <>
-                  <Text style={[styles.smallLabel, { color: theme.textMuted, marginTop: Spacing.sm }]}>
-                    BARANGAY *
-                  </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                    {barangays.map((b) => (
-                      <TouchableOpacity
-                        key={b.code}
-                        onPress={() => setSelectedBarangay(b.name)}
-                        style={[
-                          styles.chip,
-                          {
-                            backgroundColor:
-                              selectedBarangay === b.name ? theme.brandAccent : theme.bgCard,
-                            borderColor:
-                              selectedBarangay === b.name ? theme.brandAccent : theme.borderColor,
-                          },
-                        ]}>
-                        <Text
-                          style={[
-                            styles.chipText,
-                            { color: selectedBarangay === b.name ? '#1C232D' : theme.textMain },
-                          ]}>
-                          {b.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                  {fieldErrors.barangay && (
-                    <Text style={[styles.errorInline, { color: theme.danger }]}>{fieldErrors.barangay}</Text>
-                  )}
-                </>
-              )}
-
-              <Input
-                label="Street / House No."
-                value={street}
-                onChangeText={setStreet}
-                placeholder="House #, Street name"
-                error={fieldErrors.street}
-                containerStyle={{ marginTop: Spacing.sm }}
-                isRequired
+              <AddressSelector
+                province={province}
+                city={city}
+                barangay={barangay}
+                street={street}
+                errorStreet={fieldErrors.street}
+                errorProvince={fieldErrors.province}
+                errorCity={fieldErrors.city}
+                errorBarangay={fieldErrors.barangay}
+                onAddressChange={(addr) => {
+                  setProvince(addr.province);
+                  setCity(addr.city);
+                  setBarangay(addr.barangay);
+                  setStreet(addr.street);
+                  setFieldErrors((prev) => ({
+                    ...prev,
+                    province: '',
+                    city: '',
+                    barangay: '',
+                    street: '',
+                  }));
+                }}
               />
             </View>
           )}
@@ -438,7 +492,10 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
               <Input
                 label="Email Address"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(t) => {
+                  setEmail(t);
+                  if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: '' }));
+                }}
                 placeholder="name@domain.com"
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -450,10 +507,13 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
                 label="Mobile Phone"
                 prefixText="09"
                 value={phoneDisplay}
-                onChangeText={(txt) => setPhoneDisplay(txt.replace(/[^0-9]/g, '').slice(0, 9))}
+                onChangeText={(txt) => {
+                  setPhoneDisplay(txt.replace(/[^0-9]/g, '').slice(0, 9));
+                  if (fieldErrors.phone) setFieldErrors((prev) => ({ ...prev, phone: '' }));
+                }}
                 placeholder="171234567"
                 keyboardType="number-pad"
-                helperText="Enter 9 digits after 09 (Total 11 digits)."
+                helperText="Enter 9 digits after 09."
                 error={fieldErrors.phone}
                 isRequired
               />
@@ -466,7 +526,10 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
               <Input
                 label="Password"
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(t) => {
+                  setPassword(t);
+                  if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: '' }));
+                }}
                 placeholder="Min. 8 characters"
                 isPassword
                 error={fieldErrors.password}
@@ -476,22 +539,17 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
               <Input
                 label="Confirm Password"
                 value={confirmPassword}
-                onChangeText={setConfirmPassword}
+                onChangeText={(t) => {
+                  setConfirmPassword(t);
+                  if (fieldErrors.confirmPassword) {
+                    setFieldErrors((prev) => ({ ...prev, confirmPassword: '' }));
+                  }
+                }}
                 placeholder="Re-enter password"
                 isPassword
                 error={fieldErrors.confirmPassword}
                 isRequired
               />
-
-              <View style={[styles.guidelineBox, { backgroundColor: theme.surfaceSubtle }]}>
-                <Text style={[styles.guidelineTitle, { color: theme.brandAccent }]}>
-                  Password Requirements:
-                </Text>
-                <Text style={[styles.guidelineItem, { color: theme.textMuted }]}>• Minimum 8 characters</Text>
-                <Text style={[styles.guidelineItem, { color: theme.textMuted }]}>• Uppercase & lowercase letters</Text>
-                <Text style={[styles.guidelineItem, { color: theme.textMuted }]}>• At least one number</Text>
-                <Text style={[styles.guidelineItem, { color: theme.textMuted }]}>• At least one special symbol (!@#$%^&*)</Text>
-              </View>
             </View>
           )}
 
@@ -514,6 +572,27 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         </Card>
       </ScrollView>
+
+      <ScrollShortcutButton
+        scrollViewRef={scrollViewRef}
+        contentOffsetY={contentOffsetY}
+        contentHeight={contentHeight}
+        layoutHeight={layoutHeight}
+      />
+
+      <DatePickerModal
+        visible={showDatePicker}
+        initialDate={birthdate}
+        isDependent={false}
+        mode="birthdate"
+        onClose={() => setShowDatePicker(false)}
+        onSelectDate={(newDate) => {
+          setBirthdate(newDate);
+          if (fieldErrors.birthdate) {
+            setFieldErrors((prev) => ({ ...prev, birthdate: '' }));
+          }
+        }}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -521,26 +600,67 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   scrollContent: { paddingHorizontal: Spacing.md },
-  topBackBtn: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.md, gap: 6 },
+  topBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+    gap: 6,
+  },
   topBackText: { fontSize: Typography.sizes.xs, fontWeight: '800' },
   card: { padding: Spacing.xl },
-  title: { fontSize: Typography.sizes.xl, fontWeight: '800', textTransform: 'uppercase' },
-  stepIndicator: { fontSize: Typography.sizes.xs, fontWeight: '700', marginTop: 4, textTransform: 'uppercase' },
-  progressTrack: { height: 6, borderRadius: BorderRadius.pill, marginVertical: Spacing.md, overflow: 'hidden' },
+  title: {
+    fontSize: Typography.sizes.xl,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  stepIndicator: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '700',
+    marginTop: 4,
+    textTransform: 'uppercase',
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: BorderRadius.pill,
+    marginVertical: Spacing.md,
+    overflow: 'hidden',
+  },
   progressBar: { height: '100%' },
-  middleNameHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  middleNameHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   noneText: { fontSize: Typography.sizes.xs, fontWeight: '600' },
-  smallLabel: { fontSize: Typography.sizes.xs, fontWeight: '700', textTransform: 'uppercase' },
+  smallLabel: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  bdayFieldWrapper: { marginBottom: Spacing.md },
+  bdayTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    height: 48,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+  },
+  bdayTriggerText: { flex: 1, fontSize: Typography.sizes.sm, fontWeight: '700' },
+  agePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.sm },
+  agePillText: { fontSize: 10, fontWeight: '800' },
+  errorInline: { fontSize: 11, marginTop: 4, fontWeight: '600' },
+  helperInline: { fontSize: 11, marginTop: 4 },
   sexRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
-  sexBtn: { flex: 1, paddingVertical: 12, borderRadius: BorderRadius.md, borderWidth: 1.5, alignItems: 'center' },
+  sexBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    alignItems: 'center',
+  },
   sexBtnText: { fontSize: Typography.sizes.sm, fontWeight: '700' },
-  chipScroll: { marginVertical: Spacing.xs, flexDirection: 'row' },
-  chip: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: BorderRadius.pill, borderWidth: 1, marginRight: 6 },
-  chipText: { fontSize: Typography.sizes.xs, fontWeight: '700' },
-  errorInline: { fontSize: Typography.sizes.xs - 1, fontWeight: '600', marginBottom: 6 },
-  guidelineBox: { padding: Spacing.sm, borderRadius: BorderRadius.md, marginVertical: Spacing.xs },
-  guidelineTitle: { fontSize: Typography.sizes.xs, fontWeight: '800', marginBottom: 4 },
-  guidelineItem: { fontSize: Typography.sizes.xs - 1, lineHeight: 16 },
   buttonRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg },
 });

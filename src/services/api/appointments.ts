@@ -4,7 +4,7 @@ import { Appointment, SlotOccupancyResponse } from '../../types';
 export interface AppointmentsListResponse {
   self: Appointment[];
   dependents: Appointment[];
-  bulkCount: number; // Stored to display count while bulk creation is locked in app
+  bulkCount: number;
 }
 
 export const appointmentsApi = {
@@ -36,56 +36,83 @@ export const appointmentsApi = {
   },
 
   /**
-   * Queries real-time slot occupancy and clinic schedule configuration for a given date
+   * Queries real-time slot occupancy and clinic schedule configuration for a given date.
+   * Route is '/check-slots' (apiClient baseURL already includes '/api').
    */
-  checkSlots: async (date: string, excludeId?: number): Promise<SlotOccupancyResponse> => {
+  checkSlots: async (
+    date: string,
+    excludeId?: number,
+    dependentId?: number | null
+  ): Promise<SlotOccupancyResponse> => {
     const params: Record<string, string | number> = { date };
     if (excludeId) params.exclude_id = excludeId;
+    if (dependentId) params.dependent_id = dependentId;
 
-    const response = await apiClient.get<SlotOccupancyResponse>('/api/check-slots', { params });
+    const response = await apiClient.get<SlotOccupancyResponse>('/check-slots', {
+      params,
+    });
     return response.data;
   },
 
   /**
    * Submits a new appointment booking (Personal or Dependent) using FormData
    */
-  createAppointment: async (formData: FormData): Promise<{ success: boolean; appointment: Appointment }> => {
-    const response = await apiClient.post<{ success: boolean; appointment: Appointment }>('/appointments', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+  createAppointment: async (
+    formData: FormData
+  ): Promise<{ success: boolean; appointment: Appointment }> => {
+    const response = await apiClient.post<{ success: boolean; appointment: Appointment }>(
+      '/appointments',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
     return response.data;
   },
 
   /**
    * Resubmits a returned, canceled, or expired appointment with updated details
    */
-  resubmitAppointment: async (id: number, formData: FormData): Promise<{ success: boolean; message?: string }> => {
-    // Laravel method spoofing for multipart updates
+  resubmitAppointment: async (
+    id: number,
+    formData: FormData
+  ): Promise<{ success: boolean; message?: string }> => {
     formData.append('_method', 'PUT');
-
-    const response = await apiClient.post<{ success: boolean; message?: string }>(`/appointments/${id}`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await apiClient.post<{ success: boolean; message?: string }>(
+      `/appointments/${id}`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
     return response.data;
   },
 
   /**
-   * Cancels a pending, approved, or returned appointment (subject to 24-hr policy)
+   * Cancels a pending, approved, or returned appointment
    */
-  cancelAppointment: async (id: number): Promise<{ success: boolean; message?: string }> => {
-    const response = await apiClient.post<{ success: boolean; message?: string }>(`/appointments/${id}/cancel`);
+  cancelAppointment: async (
+    id: number
+  ): Promise<{ success: boolean; message?: string }> => {
+    const response = await apiClient.post<{ success: boolean; message?: string }>(
+      `/appointments/${id}/cancel`
+    );
     return response.data;
   },
 
   /**
    * Soft-deletes an expired appointment from patient dashboard view
    */
-  softDeleteAppointment: async (id: number): Promise<{ success: boolean; message?: string }> => {
-    const response = await apiClient.post<{ success: boolean; message?: string }>(`/appointments/${id}/soft-delete`);
+  softDeleteAppointment: async (
+    id: number
+  ): Promise<{ success: boolean; message?: string }> => {
+    const response = await apiClient.post<{ success: boolean; message?: string }>(
+      `/appointments/${id}/soft-delete`
+    );
     return response.data;
   },
 

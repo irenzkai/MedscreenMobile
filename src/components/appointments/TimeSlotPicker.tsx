@@ -34,7 +34,7 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color={theme.brandAccent} />
         <Text style={[styles.statusText, { color: theme.textMuted }]}>
-          Loading clinic schedules...
+          Checking real-time slot occupancy...
         </Text>
       </View>
     );
@@ -45,19 +45,20 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
       <View style={[styles.centerContainer, styles.dashedBox, { borderColor: theme.borderColor }]}>
         <Ionicons name="calendar-outline" size={32} color={theme.textMuted} />
         <Text style={[styles.statusText, { color: theme.textMuted }]}>
-          Select an appointment date above to view available time slots.
+          Please select a visit date above to view available time blocks.
         </Text>
       </View>
     );
   }
 
+  // Clinic Closed State
   if (occupancyData.is_closed) {
     return (
       <View style={[styles.centerContainer, styles.dashedBox, { borderColor: theme.danger }]}>
         <Ionicons name="close-circle-outline" size={36} color={theme.danger} />
         <Text style={[styles.statusTitle, { color: theme.danger }]}>Clinic Closed</Text>
         <Text style={[styles.statusText, { color: theme.textMuted }]}>
-          The laboratory is closed on this date. Please pick another schedule.
+          The clinic is closed on this day (Sundays or holidays). Please pick another date.
         </Text>
       </View>
     );
@@ -69,16 +70,16 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
       <View style={[styles.centerContainer, styles.dashedBox, { borderColor: theme.warning }]}>
         <Ionicons name="alert-circle-outline" size={32} color={theme.warning} />
         <Text style={[styles.statusText, { color: theme.textMuted }]}>
-          No schedule rules found for this date.
+          No clinic hours configured for this date.
         </Text>
       </View>
     );
   }
 
-  // Generate slots
-  const slots: Array<{ timeStr: string; display: string; disabled: boolean }> = [];
-  const start = new Date(`2000-01-01T${config.opening_time}`);
-  const end = new Date(`2000-01-01T${config.closing_time}`);
+  // Generate Slots matching Laravel 8:00 AM - 5:00 PM rules
+  const slots: Array<{ timeStr: string; display: string; disabled: boolean; reason?: string }> = [];
+  const start = new Date(`2000-01-01T${config.opening_time || '08:00:00'}`);
+  const end = new Date(`2000-01-01T${config.closing_time || '17:00:00'}`);
   const now = new Date();
   const todayLocal = now.toISOString().split('T')[0];
 
@@ -89,7 +90,7 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
     const timeStr = `${hours}:${minutes}:00`;
     const display = formatTimeSlot(timeStr);
 
-    const isFull = (occupancyData.full_slots || []).includes(timeStr);
+    // Rule A: Lunch Break (12:00 PM - 1:00 PM)
     const isLunch =
       config.has_lunch_break &&
       config.lunch_start &&
@@ -97,29 +98,33 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
       timeStr >= config.lunch_start &&
       timeStr < config.lunch_end;
 
-    // Check 2-hour lead time buffer if selected date is today
-    let isPast = false;
+    // Rule B: Full Capacity
+    const isFull = (occupancyData.full_slots || []).includes(timeStr);
+
+    // Rule C: 2-Hour Lead Time on Same-Day Bookings
+    let isPastLeadTime = false;
     if (date === todayLocal) {
-      const leadTimeMs = (config.lead_time_hours || 0) * 3600 * 1000;
+      const leadTimeMs = (Number(config.lead_time_hours) || 2) * 3600 * 1000;
       const slotDateTime = new Date(`${date}T${timeStr}`);
-      isPast = slotDateTime.getTime() < now.getTime() + leadTimeMs;
+      isPastLeadTime = slotDateTime.getTime() < now.getTime() + leadTimeMs;
     }
 
     if (!isLunch) {
       slots.push({
         timeStr,
         display,
-        disabled: isFull || isPast,
+        disabled: isFull || isPastLeadTime,
+        reason: isFull ? 'Full' : isPastLeadTime ? 'Passed' : undefined,
       });
     }
 
-    current.setMinutes(current.getMinutes() + config.slot_duration);
+    current.setMinutes(current.getMinutes() + (config.slot_duration || 60));
   }
 
   return (
     <View style={styles.gridContainer}>
       <Text style={[styles.sectionTitle, { color: theme.textMain }]}>
-        Available Time Blocks
+        Available Time Blocks (1-Hour Slots)
       </Text>
       <View style={styles.grid}>
         {slots.map((slot) => {
@@ -158,8 +163,14 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
                 ]}>
                 {slot.display}
               </Text>
-              {slot.disabled && (
-                <Text style={[styles.slotSub, { color: theme.danger }]}>Unavailable</Text>
+              {slot.reason && (
+                <Text
+                  style={[
+                    styles.slotSub,
+                    { color: slot.reason === 'Full' ? theme.danger : theme.textMuted },
+                  ]}>
+                  {slot.reason}
+                </Text>
               )}
             </TouchableOpacity>
           );
@@ -222,8 +233,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.25,
   },
   slotSub: {
-    fontSize: Typography.sizes.xs - 3,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
     marginTop: 2,
     textTransform: 'uppercase',
   },

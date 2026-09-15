@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,17 +16,24 @@ import { AppStackParamList } from '../../navigation/AppNavigator';
 import { useTheme } from '../../hooks/useTheme';
 import { useAuth } from '../../context/AuthContext';
 import { dependentsApi } from '../../services/api/dependents';
-import { psgcApi } from '../../services/api/psgc';
-import { PSGCItem, Sex } from '../../types';
+import { Sex } from '../../types';
 import { Header } from '../../components/common/Header';
 import { Card } from '../../components/common/Card';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
+import { NoticeBox } from '../../components/common/NoticeBox';
+import { DatePickerModal } from '../../components/common/DatePickerModal';
+import { AddressSelector } from '../../components/common/AddressSelector';
+import {
+  ScrollShortcutButton,
+  useScrollShortcut,
+} from '../../components/common/ScrollShortcutButton';
 import {
   validateName,
   validateSuffix,
   validateBirthdate,
   validateRequired,
+  calculateAge,
 } from '../../utils/validators';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
@@ -35,7 +42,10 @@ type Props = NativeStackScreenProps<AppStackParamList, 'CreateDependent'>;
 export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
   const { user } = useAuth();
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const { contentOffsetY, contentHeight, layoutHeight, handleScroll } = useScrollShortcut();
 
+  // Child Identity States
   const [firstName, setFirstName] = useState('');
   const [middleName, setMiddleName] = useState('');
   const [noMiddleName, setNoMiddleName] = useState(false);
@@ -44,46 +54,43 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
   const [birthdate, setBirthdate] = useState('');
   const [sex, setSex] = useState<Sex>('Male');
 
-  // Address
-  const [provinces, setProvinces] = useState<PSGCItem[]>([]);
-  const [cities, setCities] = useState<PSGCItem[]>([]);
-  const [barangays, setBarangays] = useState<PSGCItem[]>([]);
-  const [selectedProvince, setSelectedProvince] = useState<PSGCItem | null>(null);
-  const [selectedCity, setSelectedCity] = useState<PSGCItem | null>(null);
-  const [selectedBarangay, setSelectedBarangay] = useState<string>('');
-  const [street, setStreet] = useState('');
+  // Address States (PSGC)
+  const [province, setProvince] = useState(user?.province || '');
+  const [city, setCity] = useState(user?.city || '');
+  const [barangay, setBarangay] = useState(user?.barangay || '');
+  const [street, setStreet] = useState(user?.street || '');
 
+  // UI / Modal States
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  useEffect(() => {
-    psgcApi.getProvinces().then(setProvinces);
-  }, []);
+  const showError = (msg: string) => {
+    setErrorBanner(msg);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 50);
+  };
 
   const handleCopyParentAddress = () => {
     if (!user) return;
     setStreet(user.street || '');
-    setSelectedBarangay(user.barangay || '');
-    Alert.alert("Address Copied", "Parent's home address fields have been inherited.");
-  };
-
-  const handleProvinceSelect = async (p: PSGCItem) => {
-    setSelectedProvince(p);
-    setSelectedCity(null);
-    setSelectedBarangay('');
-    setBarangays([]);
-    const cList = await psgcApi.getCities(p.code);
-    setCities(cList);
-  };
-
-  const handleCitySelect = async (c: PSGCItem) => {
-    setSelectedCity(c);
-    setSelectedBarangay('');
-    const bList = await psgcApi.getBarangays(c.code);
-    setBarangays(bList);
+    setBarangay(user.barangay || '');
+    setCity(user.city || '');
+    setProvince(user.province || '');
+    setFieldErrors((prev) => ({
+      ...prev,
+      street: '',
+      barangay: '',
+      city: '',
+      province: '',
+    }));
+    Alert.alert('Address Copied', "Parent's home address fields have been inherited.");
   };
 
   const handleSave = async () => {
+    setErrorBanner(null);
     const errs: Record<string, string> = {};
 
     const fnErr = validateName(firstName, 'First Name');
@@ -104,14 +111,20 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
       if (sfxErr) errs.suffix = sfxErr;
     }
 
-    const bdayErr = validateBirthdate(birthdate, true); // Minor constraint (under 18)
+    const bdayErr = validateBirthdate(birthdate, true);
     if (bdayErr) errs.birthdate = bdayErr;
 
-    if (!street.trim()) errs.street = 'Street address is required.';
+    const streetErr = validateRequired(street, 'Street address');
+    if (streetErr) errs.street = streetErr;
+
+    if (!province.trim()) errs.province = 'Province is required.';
+    if (!city.trim()) errs.city = 'City / Municipality is required.';
+    if (!barangay.trim()) errs.barangay = 'Barangay is required.';
 
     setFieldErrors(errs);
+
     if (Object.keys(errs).length > 0) {
-      Alert.alert('Omissions Found', 'Please review the highlighted fields before saving.');
+      showError('Please review the highlighted omissions below before saving.');
       return;
     }
 
@@ -124,9 +137,9 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
         suffix: suffix.trim().toUpperCase() || null,
         birthdate: birthdate.trim(),
         sex,
-        province: selectedProvince?.name || user?.province || '',
-        city: selectedCity?.name || user?.city || '',
-        barangay: selectedBarangay || user?.barangay || '',
+        province: province.trim().toUpperCase(),
+        city: city.trim().toUpperCase(),
+        barangay: barangay.trim().toUpperCase(),
         street: street.trim().toUpperCase(),
       });
 
@@ -134,11 +147,13 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (err: any) {
-      Alert.alert('Registration Failed', err?.message || 'Could not register dependent.');
+      showError(err?.message || 'Could not register dependent. Please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  const liveAge = birthdate ? calculateAge(birthdate) : null;
 
   return (
     <KeyboardAvoidingView
@@ -151,15 +166,43 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
         onBack={() => navigation.goBack()}
       />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Personal Identity */}
+      <ScrollView
+        ref={scrollViewRef}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled">
+        
+        {errorBanner ? (
+          <NoticeBox
+            type="danger"
+            message={errorBanner}
+            onClose={() => setErrorBanner(null)}
+            style={{ marginBottom: Spacing.md }}
+          />
+        ) : null}
+
+        <Card style={styles.policyCard}>
+          <Ionicons name="information-circle-outline" size={20} color={theme.brandAccent} />
+          <Text style={[styles.policyText, { color: theme.textMuted }]}>
+            In compliance with Philippine health guidelines, family dependent profiles are
+            strictly reserved for minor children under 18 years of age.
+          </Text>
+        </Card>
+
+        {/* 1. Personal Identity */}
         <Card style={styles.formCard}>
-          <Text style={[styles.cardTitle, { color: theme.brandAccent }]}>1. Personal Identity</Text>
+          <Text style={[styles.cardTitle, { color: theme.brandAccent }]}>
+            1. Personal Identity
+          </Text>
 
           <Input
             label="First Name"
             value={firstName}
-            onChangeText={setFirstName}
+            onChangeText={(t) => {
+              setFirstName(t);
+              if (fieldErrors.firstName) setFieldErrors((prev) => ({ ...prev, firstName: '' }));
+            }}
             placeholder="Given Name"
             error={fieldErrors.firstName}
             isRequired
@@ -173,7 +216,10 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
                 value={noMiddleName}
                 onValueChange={(val) => {
                   setNoMiddleName(val);
-                  if (val) setMiddleName('');
+                  if (val) {
+                    setMiddleName('');
+                    setFieldErrors((prev) => ({ ...prev, middleName: '' }));
+                  }
                 }}
                 thumbColor={noMiddleName ? theme.brandAccent : '#CCC'}
               />
@@ -182,7 +228,10 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
           {!noMiddleName && (
             <Input
               value={middleName}
-              onChangeText={setMiddleName}
+              onChangeText={(t) => {
+                setMiddleName(t);
+                if (fieldErrors.middleName) setFieldErrors((prev) => ({ ...prev, middleName: '' }));
+              }}
               placeholder="Middle Name"
               error={fieldErrors.middleName}
             />
@@ -191,7 +240,10 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
           <Input
             label="Last Name"
             value={lastName}
-            onChangeText={setLastName}
+            onChangeText={(t) => {
+              setLastName(t);
+              if (fieldErrors.lastName) setFieldErrors((prev) => ({ ...prev, lastName: '' }));
+            }}
             placeholder="Surname"
             error={fieldErrors.lastName}
             isRequired
@@ -200,22 +252,62 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
           <Input
             label="Suffix (e.g. JR, SR, III)"
             value={suffix}
-            onChangeText={setSuffix}
+            onChangeText={(t) => {
+              setSuffix(t);
+              if (fieldErrors.suffix) setFieldErrors((prev) => ({ ...prev, suffix: '' }));
+            }}
             placeholder="Optional"
             error={fieldErrors.suffix}
           />
 
-          <Input
-            label="Birthdate (YYYY-MM-DD)"
-            value={birthdate}
-            onChangeText={setBirthdate}
-            placeholder="YYYY-MM-DD"
-            helperText="Dependents must be minors under 18 years of age."
-            error={fieldErrors.birthdate}
-            isRequired
-          />
+          {/* Automated Birthdate Selector */}
+          <View style={styles.bdayFieldWrapper}>
+            <Text style={[styles.smallLabel, { color: theme.textMuted, marginBottom: 4 }]}>
+              BIRTHDATE *
+            </Text>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setShowDatePicker(true)}
+              style={[
+                styles.bdayTrigger,
+                {
+                  backgroundColor: theme.bgCard,
+                  borderColor: fieldErrors.birthdate ? theme.danger : theme.borderColor,
+                  borderWidth: fieldErrors.birthdate ? 1.5 : 1,
+                },
+              ]}>
+              <Ionicons
+                name="calendar"
+                size={18}
+                color={theme.brandAccent}
+                style={{ marginRight: 8 }}
+              />
+              <Text
+                style={[
+                  styles.bdayTriggerText,
+                  { color: birthdate ? theme.textMain : theme.textMuted },
+                ]}>
+                {birthdate ? birthdate : 'Tap to Select Birthdate'}
+              </Text>
+              {liveAge !== null && (
+                <View style={[styles.agePill, { backgroundColor: theme.surfaceSubtle }]}>
+                  <Text style={[styles.agePillText, { color: theme.brandAccent }]}>
+                    {liveAge} YRS OLD (MINOR)
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {fieldErrors.birthdate ? (
+              <Text style={[styles.errorInline, { color: theme.danger }]}>
+                {fieldErrors.birthdate}
+              </Text>
+            ) : null}
+          </View>
 
-          <Text style={[styles.smallLabel, { color: theme.textMuted, marginBottom: 6 }]}>SEX *</Text>
+          {/* Sex Selector */}
+          <Text style={[styles.smallLabel, { color: theme.textMuted, marginBottom: 6 }]}>
+            SEX *
+          </Text>
           <View style={styles.sexRow}>
             {(['Male', 'Female'] as Sex[]).map((s) => (
               <TouchableOpacity
@@ -228,7 +320,11 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
                     backgroundColor: sex === s ? theme.surfaceSubtle : theme.bgCard,
                   },
                 ]}>
-                <Text style={{ color: sex === s ? theme.brandAccent : theme.textMain, fontWeight: '700' }}>
+                <Text
+                  style={{
+                    color: sex === s ? theme.brandAccent : theme.textMain,
+                    fontWeight: '700',
+                  }}>
                   {s}
                 </Text>
               </TouchableOpacity>
@@ -236,7 +332,7 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </Card>
 
-        {/* Residential Address */}
+        {/* 2. Residential Address */}
         <Card style={styles.formCard}>
           <View style={styles.addressHeaderRow}>
             <Text style={[styles.cardTitle, { color: theme.brandAccent, marginBottom: 0 }]}>
@@ -251,38 +347,31 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
             />
           </View>
 
-          <Input
-            label="Street / House No."
-            value={street}
-            onChangeText={setStreet}
-            placeholder="House / Lot / Street Name"
-            error={fieldErrors.street}
-            isRequired
+          <AddressSelector
+            province={province}
+            city={city}
+            barangay={barangay}
+            street={street}
+            errorStreet={fieldErrors.street}
+            errorProvince={fieldErrors.province}
+            errorCity={fieldErrors.city}
+            errorBarangay={fieldErrors.barangay}
+            onAddressChange={(addr) => {
+              setProvince(addr.province);
+              setCity(addr.city);
+              setBarangay(addr.barangay);
+              setStreet(addr.street);
+              setFieldErrors((prev) => ({
+                ...prev,
+                province: '',
+                city: '',
+                barangay: '',
+                street: '',
+              }));
+            }}
           />
-
-          {/* Quick Select Region Pills if not copying */}
-          <Text style={[styles.smallLabel, { color: theme.textMuted, marginTop: Spacing.xs }]}>PROVINCE</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-            {provinces.slice(0, 10).map((p) => (
-              <TouchableOpacity
-                key={p.code}
-                onPress={() => handleProvinceSelect(p)}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: selectedProvince?.code === p.code ? theme.brandAccent : theme.bgCard,
-                    borderColor: selectedProvince?.code === p.code ? theme.brandAccent : theme.borderColor,
-                  },
-                ]}>
-                <Text style={{ color: selectedProvince?.code === p.code ? '#1C232D' : theme.textMain, fontSize: 11, fontWeight: '700' }}>
-                  {p.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
         </Card>
 
-        {/* Submit */}
         <Button
           title="Save to Family List"
           onPress={handleSave}
@@ -291,6 +380,27 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
           style={{ marginTop: Spacing.md }}
         />
       </ScrollView>
+
+      <ScrollShortcutButton
+        scrollViewRef={scrollViewRef}
+        contentOffsetY={contentOffsetY}
+        contentHeight={contentHeight}
+        layoutHeight={layoutHeight}
+      />
+
+      <DatePickerModal
+        visible={showDatePicker}
+        initialDate={birthdate}
+        isDependent={true}
+        mode="birthdate"
+        onClose={() => setShowDatePicker(false)}
+        onSelectDate={(newDate) => {
+          setBirthdate(newDate);
+          if (fieldErrors.birthdate) {
+            setFieldErrors((prev) => ({ ...prev, birthdate: '' }));
+          }
+        }}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -298,15 +408,60 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   scrollContent: { padding: Spacing.md, paddingBottom: 60 },
+  policyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.sm,
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  policyText: { fontSize: Typography.sizes.xs - 1, flex: 1, lineHeight: 16 },
   formCard: { padding: Spacing.md, marginBottom: Spacing.md },
-  cardTitle: { fontSize: Typography.sizes.xs, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: Spacing.md },
-  middleNameHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  cardTitle: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: Spacing.md,
+  },
+  middleNameHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   noneText: { fontSize: Typography.sizes.xs, fontWeight: '600' },
-  smallLabel: { fontSize: Typography.sizes.xs, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  smallLabel: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  bdayFieldWrapper: { marginBottom: Spacing.md },
+  bdayTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    height: 48,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+  },
+  bdayTriggerText: { flex: 1, fontSize: Typography.sizes.sm, fontWeight: '700' },
+  agePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.sm },
+  agePillText: { fontSize: 10, fontWeight: '800' },
+  errorInline: { fontSize: 11, marginTop: 4, fontWeight: '600' },
   sexRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
-  sexBtn: { flex: 1, paddingVertical: 12, borderRadius: BorderRadius.md, borderWidth: 1.5, alignItems: 'center' },
-  addressHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
-  chipScroll: { marginVertical: Spacing.xs, flexDirection: 'row' },
-  chip: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: BorderRadius.pill, borderWidth: 1, marginRight: 6 },
+  sexBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    alignItems: 'center',
+  },
+  addressHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
 });

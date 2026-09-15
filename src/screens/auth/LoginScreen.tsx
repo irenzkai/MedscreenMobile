@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,9 @@ import {
   Platform,
   TouchableOpacity,
   Alert,
+  Image,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthStackParamList } from '../../navigation/AuthNavigator';
 import { useAuth } from '../../context/AuthContext';
@@ -18,8 +18,9 @@ import { useTheme } from '../../hooks/useTheme';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
+import { NoticeBox } from '../../components/common/NoticeBox';
 import { validateEmail, validateRequired } from '../../utils/validators';
-import { Spacing, Typography, BorderRadius } from '../../constants/theme';
+import { Spacing, Typography } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
@@ -27,13 +28,20 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { login } = useAuth();
+  const scrollViewRef = useRef<ScrollView | null>(null);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+
+  const showError = (msg: string) => {
+    setErrorMessage(msg);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 50);
+  };
 
   const handleLogin = async () => {
     setErrorMessage(null);
@@ -45,6 +53,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
         email: emailErr || undefined,
         password: passErr || undefined,
       });
+      showError('Please check the highlighted credentials below.');
       return;
     }
 
@@ -67,11 +76,14 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
             ]
           );
         } else {
-          setErrorMessage(res.message || 'Invalid email or password.');
+          showError(res.message || 'Invalid email or password.');
         }
+      } else if (res.unverified) {
+        // Direct unverified user to account verification
+        navigation.navigate('VerifyAccount', { email: email.trim() });
       }
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Login failed. Please try again.');
+      showError(err?.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -82,15 +94,23 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.bgMain }]}>
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: Math.max(insets.top + Spacing.lg, 40), paddingBottom: insets.bottom + 20 },
+          {
+            paddingTop: Math.max(insets.top + Spacing.lg, 40),
+            paddingBottom: insets.bottom + 20,
+          },
         ]}
         keyboardShouldPersistTaps="handled">
-        {/* Top Brand Logo Banner */}
+        {/* Brand Header with Circular Clipped Logo */}
         <View style={styles.brandHeader}>
           <View style={[styles.logoCircle, { borderColor: theme.brandAccent }]}>
-            <Ionicons name="fitness" size={32} color={theme.brandAccent} />
+            <Image
+              source={require('../../../assets/images/logo.jpg')}
+              style={styles.logoImage}
+              resizeMode="cover"
+            />
           </View>
           <Text style={[styles.brandTitle, { color: theme.textMain }]}>
             MED<Text style={{ color: theme.brandAccent }}>SCREEN</Text>
@@ -107,13 +127,14 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
             Sign in with your registered patient account credentials.
           </Text>
 
-          {/* Error Banner */}
-          {errorMessage && (
-            <View style={[styles.errorBanner, { backgroundColor: 'rgba(220, 53, 69, 0.08)', borderColor: theme.danger }]}>
-              <Ionicons name="alert-circle" size={18} color={theme.danger} />
-              <Text style={[styles.errorBannerText, { color: theme.danger }]}>{errorMessage}</Text>
-            </View>
-          )}
+          {errorMessage ? (
+            <NoticeBox
+              type="danger"
+              message={errorMessage}
+              onClose={() => setErrorMessage(null)}
+              style={{ marginBottom: Spacing.md }}
+            />
+          ) : null}
 
           <Input
             label="Email Address"
@@ -160,7 +181,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
             style={{ marginTop: Spacing.sm }}
           />
 
-          {/* Registration Redirection Footer */}
+          {/* Registration Footer */}
           <View style={styles.registerFooter}>
             <Text style={[styles.registerPrompt, { color: theme.textMuted }]}>
               Don't have an account?{' '}
@@ -182,13 +203,19 @@ const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: Spacing.md, justifyContent: 'center' },
   brandHeader: { alignItems: 'center', marginBottom: Spacing.xl },
   logoCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     borderWidth: 2,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.sm,
+    backgroundColor: '#000',
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   brandTitle: {
     fontSize: 24,
@@ -213,20 +240,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: Spacing.lg,
     lineHeight: 18,
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    marginBottom: Spacing.md,
-    gap: Spacing.xs,
-  },
-  errorBannerText: {
-    fontSize: Typography.sizes.xs,
-    fontWeight: '600',
-    flex: 1,
   },
   forgotBtn: {
     alignSelf: 'flex-end',

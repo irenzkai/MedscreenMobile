@@ -66,7 +66,7 @@ export const NotificationsScreen: React.FC = () => {
       // Proceed gracefully
     }
 
-    navigation.navigate('Appointments');
+    navigation.navigate('PatientTabs', { screen: 'Appointments' });
   };
 
   const handleClearAll = async () => {
