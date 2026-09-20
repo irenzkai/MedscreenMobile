@@ -33,6 +33,7 @@ import { EXTERNAL_ROUTES } from '../../constants/config';
 import {
   isAppointmentExpired,
   getEffectiveAppointmentStatus,
+  getCancellationPolicyDetails,
 } from '../../utils/formatters';
 import { Spacing, Typography, BorderRadius, StatusColors } from '../../constants/theme';
 
@@ -78,7 +79,7 @@ export const AppointmentsScreen: React.FC = () => {
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
     visible: boolean;
     title: string;
-    message: string;
+    message: string | React.ReactNode;
     confirmText: string;
     cancelText?: string;
     icon?: keyof typeof Ionicons.glyphMap;
@@ -152,10 +153,13 @@ export const AppointmentsScreen: React.FC = () => {
     STATUS_OPTIONS.find((s) => s.key === selectedStatus) || STATUS_OPTIONS[0];
 
   const handlePromptCancel = (app: Appointment) => {
+    // Uses the shared timezone-safe cancellation calculator
+    const { isWithin24Hours, scheduledFormatted } = getCancellationPolicyDetails(app);
+    const isPaid = app.payment_status === 'paid';
+
     setConfirmModalConfig({
       visible: true,
       title: 'Cancel Appointment',
-      message: `Are you sure you want to cancel? This time block will be reopened.`,
       confirmText: 'Cancel',
       cancelText: 'Keep',
       icon: 'close-circle-outline',
@@ -176,6 +180,91 @@ export const AppointmentsScreen: React.FC = () => {
           setActionLoading(false);
         }
       },
+      message: (
+        <View style={styles.cancelModalContent}>
+          <Text style={[styles.cancelModalPrompt, { color: theme.textMain }]}>
+            Are you sure you want to cancel this appointment?
+          </Text>
+
+          {/* Cashless Booking Disclosures */}
+          {app.payment_method === 'Cashless' ? (
+            isPaid ? (
+              isWithin24Hours ? (
+                <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning }]}>
+                  <View style={styles.cancelAlertHeader}>
+                    <Ionicons name="checkmark-circle" size={14} color={theme.success} />
+                    <Text style={[styles.cancelAlertBadgeText, { color: theme.success }]}>
+                      Payment Status: Confirmed Paid
+                    </Text>
+                  </View>
+                  <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                    <Text style={[styles.policyHighlight, { color: theme.warning }]}>50% Fee Applies: </Text>
+                    Because cancellation is requested within 24 hours of your slot ({scheduledFormatted}), a{' '}
+                    <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies. 50% will be refunded to your account.
+                  </Text>
+                </View>
+              ) : (
+                <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(25, 211, 140, 0.08)', borderColor: theme.brandAccent }]}>
+                  <View style={styles.cancelAlertHeader}>
+                    <Ionicons name="checkmark-circle" size={14} color={theme.success} />
+                    <Text style={[styles.cancelAlertBadgeText, { color: theme.success }]}>
+                      Payment Status: Confirmed Paid
+                    </Text>
+                  </View>
+                  <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                    <Text style={[styles.policyHighlight, { color: theme.brandAccent }]}>100% Full Refund Eligible: </Text>
+                    You are canceling more than 24 hours in advance. Your paid cashless transaction is eligible for a{' '}
+                    <Text style={{ fontWeight: '800' }}>100% full refund</Text>.
+                  </Text>
+                </View>
+              )
+            ) : (
+              isWithin24Hours ? (
+                <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning }]}>
+                  <View style={styles.cancelAlertHeader}>
+                    <Ionicons name="time" size={14} color={theme.warning} />
+                    <Text style={[styles.cancelAlertBadgeText, { color: theme.warning }]}>
+                      Payment Status: Pending Verification
+                    </Text>
+                  </View>
+                  <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                    Your uploaded payment receipt has not been confirmed yet. Since you are canceling within 24 hours of your slot ({scheduledFormatted}), a{' '}
+                    <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies upon confirmation.
+                  </Text>
+                </View>
+              ) : (
+                <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(13, 202, 240, 0.08)', borderColor: theme.info }]}>
+                  <View style={styles.cancelAlertHeader}>
+                    <Ionicons name="time" size={14} color={theme.info} />
+                    <Text style={[styles.cancelAlertBadgeText, { color: theme.info }]}>
+                      Payment Status: Pending Verification
+                    </Text>
+                  </View>
+                  <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                    Your uploaded payment receipt has not been confirmed yet. Since you are canceling more than 24 hours in advance, the booking will be canceled with no charge.
+                  </Text>
+                </View>
+              )
+            )
+          ) : (
+            /* Cash on Site Booking Disclosures */
+            isWithin24Hours ? (
+              <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning }]}>
+                <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                  <Text style={[styles.policyHighlight, { color: theme.warning }]}>Notice: </Text>
+                  Canceling within 24 hours of your scheduled appointment time ({scheduledFormatted}).
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(108, 117, 125, 0.08)', borderColor: theme.borderColor }]}>
+                <Text style={[styles.cancelAlertBody, { color: theme.textMuted }]}>
+                  Free cancellation available for this cash booking (more than 24 hours in advance).
+                </Text>
+              </View>
+            )
+          )}
+        </View>
+      ),
     });
   };
 
@@ -657,4 +746,41 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   optionLabel: { fontSize: Typography.sizes.xs },
+
+  // Cancellation Policy Disclosure inside Modal
+  cancelModalContent: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  cancelModalPrompt: {
+    fontSize: Typography.sizes.xs,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: Spacing.sm,
+  },
+  cancelAlertBox: {
+    padding: Spacing.sm + 2,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  cancelAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  cancelAlertBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  cancelAlertBody: {
+    fontSize: Typography.sizes.xs - 1,
+    lineHeight: 16,
+  },
+  policyHighlight: {
+    fontWeight: '800',
+  },
 });

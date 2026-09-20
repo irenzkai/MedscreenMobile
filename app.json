@@ -7,9 +7,8 @@
     "icon": "./assets/images/logo.jpg",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/images/logo.jpg",
-      "resizeMode": "contain",
-      "backgroundColor": "#1C232D"
+      "backgroundColor": "#FFFFFF",
+      "resizeMode": "contain"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -22,7 +21,7 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo.jpg",
-        "backgroundColor": "#1C232D"
+        "backgroundColor": "#FFFFFF"
       },
       "permissions": [
         "INTERNET",
@@ -37,12 +36,6 @@
           "iCloudContainerEnvironment": "Production"
         }
       ]
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "55913cbd-232c-4ba4-891a-784a6e7e9c6c"
-      }
-    },
-    "owner": "irenzkai"
+    ]
   }
 }

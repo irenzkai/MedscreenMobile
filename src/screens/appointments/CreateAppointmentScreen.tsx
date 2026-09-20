@@ -25,6 +25,7 @@ import {
   SlotOccupancyResponse,
   Sex,
   PaymentMethod,
+  Appointment,
 } from '../../types';
 import { Header } from '../../components/common/Header';
 import { Card } from '../../components/common/Card';
@@ -52,6 +53,7 @@ import {
 } from '../../utils/validators';
 import {
   formatCurrency,
+  formatDate,
   formatDisplayPhone,
   formatToStandardPhone,
   formatPatientName,
@@ -139,6 +141,10 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [lightboxTitle, setLightboxTitle] = useState('');
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+
+  // Designed Success Modal State
+  const [successModalVisible, setSuccessModalVisible] = useState<boolean>(false);
+  const [createdAppointment, setCreatedAppointment] = useState<Appointment | null>(null);
 
   // Field validation and Step errors
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -391,7 +397,7 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
         return false;
       }
       if (!agreedToTerms) {
-        showError('Please agree to the Clinical Privacy Policy before submitting.');
+        showError('Please agree to the Clinical Privacy Policy and Cancellation Terms before submitting.');
         return false;
       }
     }
@@ -470,23 +476,19 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
 
       const res = await appointmentsApi.createAppointment(formData);
       if (res.success || res.appointment) {
-        Alert.alert(
-          'Appointment Requested!',
-          `Your appointment #${res.appointment?.id || ''} has been registered and sent for laboratory review.`,
-          [
-            {
-              text: 'OK',
-              onPress: () =>
-                navigation.navigate('PatientTabs', { screen: 'Appointments' }),
-            },
-          ]
-        );
+        setCreatedAppointment(res.appointment || null);
+        setSuccessModalVisible(true);
       }
     } catch (err: any) {
       showError(err?.message || 'Could not complete appointment registration.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSuccessDismiss = () => {
+    setSuccessModalVisible(false);
+    navigation.navigate('PatientTabs', { screen: 'Appointments' });
   };
 
   const calculatedPatientAge = birthdate ? calculateAge(birthdate) : null;
@@ -833,7 +835,7 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
 
               {/* Address */}
               <Text style={[styles.subCardHeader, { color: theme.brandAccent, marginTop: Spacing.md }]}>
-                Residential Address (PSGC)
+                Residential Address
               </Text>
               <AddressSelector
                 province={province}
@@ -1004,7 +1006,7 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
         {currentStep === 5 && (
           <View>
             <Text style={[styles.stepTitle, { color: theme.textMain }]}>
-              Payment & Finalize
+              Payment & Final Review
             </Text>
             <Text style={[styles.stepSubtitle, { color: theme.textMuted }]}>
               Review booking total and confirm payment settlement.
@@ -1116,6 +1118,7 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
               </Card>
             )}
 
+            {/* Terms, Privacy Policy, and Cancellation Fee Disclosure */}
             <Card style={[styles.stepCard, { marginTop: Spacing.md }]}>
               <View style={styles.termsRow}>
                 <Switch
@@ -1124,13 +1127,49 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
                   thumbColor={agreedToTerms ? theme.brandAccent : '#CCC'}
                 />
                 <Text style={[styles.termsText, { color: theme.textMain }]}>
-                  I agree to the{' '}
+                  I confirm that all information provided is accurate and I agree to the{' '}
                   <Text
                     onPress={() => openWebUrl(EXTERNAL_ROUTES.LEGAL_PRIVACY)}
                     style={{ color: theme.brandAccent, fontWeight: '800' }}>
                     Clinical Privacy Policy
                   </Text>
                   .
+                </Text>
+              </View>
+
+              {/* Cancellation & Refund Policy Box */}
+              <View
+                style={[
+                  styles.cancellationBox,
+                  {
+                    borderColor: 'rgba(108, 117, 125, 0.15)',
+                    backgroundColor: theme.surfaceSubtle,
+                  },
+                ]}>
+                <View style={styles.cancellationHeader}>
+                  <Ionicons name="information-circle" size={14} color={theme.warning} />
+                  <Text style={[styles.cancellationTitle, { color: theme.warning }]}>
+                    CANCELLATION & REFUND POLICY:
+                  </Text>
+                </View>
+                <Text style={[styles.cancellationText, { color: theme.textMuted }]}>
+                  Cancellations made{' '}
+                  <Text style={{ fontWeight: '800', color: theme.textMain }}>
+                    more than 24 hours
+                  </Text>{' '}
+                  prior to your scheduled visit qualify for a{' '}
+                  <Text style={{ fontWeight: '800', color: theme.textMain }}>
+                    100% full refund
+                  </Text>
+                  . Cancellations requested{' '}
+                  <Text style={{ fontWeight: '800', color: theme.textMain }}>
+                    within 24 hours
+                  </Text>{' '}
+                  of your scheduled time are subject to a{' '}
+                  <Text style={{ fontWeight: '800', color: theme.textMain }}>
+                    50% administrative cancellation fee
+                  </Text>{' '}
+                  (50% refund).
                 </Text>
               </View>
             </Card>
@@ -1155,6 +1194,52 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
           />
         </View>
       </ScrollView>
+
+      {/* UNIFIED MODAL: Designed Appointment Request Success Prompt */}
+      <ActionModal
+        visible={successModalVisible}
+        type="success"
+        icon="checkmark-circle-outline"
+        title="Booking Requested!"
+        isSingleAction={true}
+        confirmText="View My Bookings"
+        onClose={handleSuccessDismiss}
+        onConfirm={handleSuccessDismiss}
+        message={
+          <View style={styles.successModalBody}>
+            <Text style={[styles.successDesc, { color: theme.textMuted }]}>
+              Your clinical appointment has been registered and successfully sent for laboratory review.
+            </Text>
+
+            <View
+              style={[
+                styles.successSummaryCard,
+                { backgroundColor: theme.surfaceSubtle, borderColor: theme.borderColor },
+              ]}>
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Patient:</Text>
+                <Text style={[styles.successRowVal, { color: theme.textMain }]} numberOfLines={1}>
+                  {formatPatientName(firstName, middleName, lastName, suffix)}
+                </Text>
+              </View>
+
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Schedule:</Text>
+                <Text style={[styles.successRowVal, { color: theme.textMain }]}>
+                  {formatDate(appointmentDate)} • {selectedSlotDisplay}
+                </Text>
+              </View>
+
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Total Bill:</Text>
+                <Text style={[styles.successRowVal, { color: theme.brandAccent }]}>
+                  {formatCurrency(totalBill)} ({paymentMethod})
+                </Text>
+              </View>
+            </View>
+          </View>
+        }
+      />
 
       {/* UNIFIED MODAL: External Bulk Website Redirection */}
       <ActionModal
@@ -1363,6 +1448,86 @@ const styles = StyleSheet.create({
   qrZoomHint: { fontSize: 11, marginTop: 6, fontWeight: '600' },
   receiptUploadBox: { borderTopWidth: 1, paddingTop: Spacing.sm },
   termsRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  termsText: { fontSize: Typography.sizes.xs - 1, flex: 1, lineHeight: 16 },
+  termsText: { fontSize: Typography.sizes.xs, flex: 1, lineHeight: 18 },
+  cancellationBox: {
+    marginTop: Spacing.md,
+    padding: Spacing.sm + 2,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+  },
+  cancellationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  cancellationTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  cancellationText: {
+    fontSize: Typography.sizes.xs - 1,
+    lineHeight: 16,
+  },
   wizardFooter: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg },
+
+  // Success Modal Design Styles
+  successModalBody: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: Spacing.xs,
+  },
+  refBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.pill,
+    marginBottom: Spacing.sm,
+  },
+  refBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  successDesc: {
+    fontSize: Typography.sizes.xs,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: Spacing.md,
+  },
+  successSummaryCard: {
+    width: '100%',
+    padding: Spacing.sm + 2,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    gap: 6,
+    marginBottom: Spacing.md,
+  },
+  successRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  successRowLabel: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '600',
+  },
+  successRowVal: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '800',
+    flex: 1,
+    textAlign: 'right',
+    marginLeft: 8,
+  },
+  successNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  successNoteText: {
+    fontSize: 10,
+    flex: 1,
+    lineHeight: 14,
+  },
 });

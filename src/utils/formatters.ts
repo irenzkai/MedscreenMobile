@@ -8,6 +8,75 @@ export { calculateAge } from './validators';
 // ============================================================================
 
 /**
+ * Accurately constructs a local Date object from an appointment date & time slot,
+ * preventing UTC date shifting across timezones.
+ */
+export function getAppointmentScheduledDate(appointment: Appointment): Date | null {
+  if (!appointment.appointment_date) return null;
+
+  let year: number;
+  let month: number; // 0-indexed
+  let day: number;
+
+  const rawDate = appointment.appointment_date;
+
+  if (rawDate.includes('T')) {
+    const parsed = new Date(rawDate);
+    if (isNaN(parsed.getTime())) return null;
+    year = parsed.getFullYear();
+    month = parsed.getMonth();
+    day = parsed.getDate();
+  } else {
+    const parts = rawDate.split('-').map((p) => parseInt(p, 10));
+    if (parts.length < 3 || parts.some(isNaN)) return null;
+    year = parts[0];
+    month = parts[1] - 1;
+    day = parts[2];
+  }
+
+  let hours = 0;
+  let minutes = 0;
+  let seconds = 0;
+
+  if (appointment.time_slot) {
+    const timeParts = appointment.time_slot.split(':').map((p) => parseInt(p, 10));
+    if (timeParts.length >= 2 && !isNaN(timeParts[0]) && !isNaN(timeParts[1])) {
+      hours = timeParts[0];
+      minutes = timeParts[1];
+      if (timeParts.length >= 3 && !isNaN(timeParts[2])) {
+        seconds = timeParts[2];
+      }
+    }
+  }
+
+  return new Date(year, month, day, hours, minutes, seconds);
+}
+
+/**
+ * Evaluates whether an appointment is within 24 hours of its scheduled slot.
+ */
+export function getCancellationPolicyDetails(appointment: Appointment): {
+  isWithin24Hours: boolean;
+  scheduledFormatted: string;
+  diffHours: number;
+} {
+  const scheduled = getAppointmentScheduledDate(appointment);
+  const scheduledFormatted = `${formatDate(appointment.appointment_date)} ${formatTimeSlot(appointment.time_slot)}`;
+
+  if (!scheduled) {
+    return { isWithin24Hours: false, scheduledFormatted, diffHours: 999 };
+  }
+
+  const now = new Date();
+  const diffHours = (scheduled.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+  // Strictly within 24 hours: 0 <= diffHours < 24
+  const isWithin24Hours = diffHours >= 0 && diffHours < 24;
+
+  return { isWithin24Hours, scheduledFormatted, diffHours };
+}
+
+/**
  * Calculates whether an appointment has dynamically expired (24-hour unprogressed rule).
  */
 export function isAppointmentExpired(appointment: Appointment): boolean {
@@ -17,22 +86,15 @@ export function isAppointmentExpired(appointment: Appointment): boolean {
   if (appointment.status === 'expired') {
     return true;
   }
-  if (!appointment.appointment_date) {
+
+  const scheduled = getAppointmentScheduledDate(appointment);
+  if (!scheduled || isNaN(scheduled.getTime())) {
     return false;
   }
 
-  try {
-    const dateStr = appointment.appointment_date.split('T')[0];
-    const timeStr = appointment.time_slot || '00:00:00';
-    const scheduled = new Date(`${dateStr}T${timeStr}`);
-    if (isNaN(scheduled.getTime())) return false;
-
-    // Matching Laravel Carbon rule: now > scheduledAt + 24 hours
-    const expiryTimestamp = scheduled.getTime() + 24 * 60 * 60 * 1000;
-    return Date.now() > expiryTimestamp;
-  } catch {
-    return false;
-  }
+  // Matching Laravel Carbon rule: now > scheduledAt + 24 hours
+  const expiryTimestamp = scheduled.getTime() + 24 * 60 * 60 * 1000;
+  return Date.now() > expiryTimestamp;
 }
 
 /**
@@ -47,10 +109,8 @@ export function getEffectiveAppointmentStatus(appointment: Appointment): Appoint
 
 /**
  * Reliably calculates the patient age from the appointment snapshot or parent/dependent birthdates.
- * Solves the " Years Old with no number" bug.
  */
 export function calculatePatientAge(appointment: Appointment): string {
-  // If numeric age is provided by the server, use it
   if (
     appointment.patient_age !== undefined &&
     appointment.patient_age !== null &&
@@ -60,18 +120,14 @@ export function calculatePatientAge(appointment: Appointment): string {
     return `${appointment.patient_age} Years Old`;
   }
 
-  // Calculate age from birthdate fallback chain
   const rawBirthdate =
-    appointment.patient_birthdate ||
-    appointment.dependent?.birthdate;
-
+    appointment.patient_birthdate || appointment.dependent?.birthdate;
   if (rawBirthdate) {
     const age = calculateAge(rawBirthdate);
     if (age >= 0) {
       return `${age} Years Old`;
     }
   }
-
   return 'Age Not Specified';
 }
 
@@ -83,10 +139,13 @@ export function formatCurrency(amount: number | string | null | undefined): stri
     return '₱0.00';
   }
   const numeric = typeof amount === 'string' ? parseFloat(amount) : amount;
-  return '₱' + numeric.toLocaleString('en-PH', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return (
+    '₱' +
+    numeric.toLocaleString('en-PH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
 }
 
 /**
@@ -105,7 +164,6 @@ export function formatPatientName(
       : '';
   const l = lastName ? lastName.trim().toUpperCase() : '';
   const s = suffix ? suffix.trim().toUpperCase() : '';
-
   const parts = [f, m, l].filter(Boolean);
   let compiled = parts.join(' ');
   if (s) {

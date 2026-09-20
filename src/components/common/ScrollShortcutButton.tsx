@@ -9,6 +9,7 @@ import {
   NativeScrollEvent,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../hooks/useTheme';
 import { BorderRadius } from '../../constants/theme';
 
@@ -47,6 +48,7 @@ export const ScrollShortcutButton: React.FC<ScrollShortcutButtonProps> = ({
   style,
 }) => {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
 
   // Only render if the screen is actually scrollable (content exceeds viewport by at least 80px)
   const isScrollable = contentHeight > layoutHeight + 80;
@@ -63,6 +65,9 @@ export const ScrollShortcutButton: React.FC<ScrollShortcutButtonProps> = ({
     }
   };
 
+  // Safe bottom offset that clears the Android navigation bar and wizard buttons
+  const dynamicBottom = Math.max(insets.bottom + 85, 96);
+
   return (
     <TouchableOpacity
       activeOpacity={0.85}
@@ -72,6 +77,7 @@ export const ScrollShortcutButton: React.FC<ScrollShortcutButtonProps> = ({
         {
           backgroundColor: theme.brandDark,
           borderColor: theme.borderSecondary,
+          bottom: dynamicBottom,
         },
         style,
       ]}>
@@ -87,20 +93,19 @@ export const ScrollShortcutButton: React.FC<ScrollShortcutButtonProps> = ({
 const styles = StyleSheet.create({
   floatingButton: {
     position: 'absolute',
-    bottom: 24,
     right: 18,
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: BorderRadius.pill,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 0.65, // Faint appearance
+    opacity: 0.75, // Subtle but easily readable
     zIndex: 999,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
-    elevation: 4,
+    elevation: 6,
   },
 });

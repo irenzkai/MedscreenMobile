@@ -25,7 +25,6 @@ import { LightboxModal } from '../../components/common/LightboxModal';
 import {
   resolveFileUrl,
   downloadFile,
-  getAppointmentResultApiUrl,
   isImageDocument,
   isPdfDocument,
 } from '../../utils/fileHelpers';
@@ -55,7 +54,6 @@ export const MedicalHistoryScreen: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [handshakeLoading, setHandshakeLoading] = useState<boolean>(false);
-
   const [noticeMessage, setNoticeMessage] = useState<{
     type: 'danger' | 'warning' | 'info' | 'success';
     text: string;
@@ -141,7 +139,6 @@ export const MedicalHistoryScreen: React.FC = () => {
     const fullUrl = resolveFileUrl(filePath);
     const isImage = isImageDocument(fullUrl);
     const isPdf = isPdfDocument(fullUrl);
-
     setPreviewTitle(label);
     setPreviewUri(fullUrl);
     setActiveDownloadUrl(fullUrl);
@@ -154,6 +151,95 @@ export const MedicalHistoryScreen: React.FC = () => {
     const isImage = isImageDocument(fullUrl);
     const ext = isImage ? 'jpg' : 'pdf';
     downloadFile(fullUrl, `${label}.${ext}`);
+  };
+
+  // Clinically accurate status footer resolver
+  const renderAppointmentFooterStatus = (app: Appointment) => {
+    const isExpired = isAppointmentExpired(app);
+    const effectiveStatus = getEffectiveAppointmentStatus(app);
+
+    if (effectiveStatus === 'released') {
+      return (
+        <TouchableOpacity
+          style={[styles.viewReportBtn, { backgroundColor: theme.brandAccent }]}
+          onPress={() =>
+            navigation.navigate('AppointmentDetail', { appointmentId: app.id })
+          }>
+          <Ionicons name="document-text-outline" size={12} color="#1C232D" />
+          <Text style={styles.viewReportBtnText}>VIEW REPORT</Text>
+        </TouchableOpacity>
+      );
+    }
+
+    if (isExpired || effectiveStatus === 'expired') {
+      return (
+        <Text style={[styles.processingText, { color: theme.danger }]}>
+          Expired (Past 24-hr schedule)
+        </Text>
+      );
+    }
+
+    if (effectiveStatus === 'canceled') {
+      return (
+        <Text style={[styles.processingText, { color: theme.textMuted }]}>
+          Appointment Canceled
+        </Text>
+      );
+    }
+
+    if (effectiveStatus === 'returned') {
+      return (
+        <Text style={[styles.processingText, { color: theme.danger }]}>
+          Corrections Requested
+        </Text>
+      );
+    }
+
+    if (effectiveStatus === 'retest') {
+      return (
+        <Text style={[styles.processingText, { color: theme.warning }]}>
+          Retesting Required
+        </Text>
+      );
+    }
+
+    if (effectiveStatus === 'pending') {
+      return (
+        <Text style={[styles.processingText, { color: theme.textMuted }]}>
+          Awaiting clinic review...
+        </Text>
+      );
+    }
+
+    if (effectiveStatus === 'approved') {
+      return (
+        <Text style={[styles.processingText, { color: theme.brandAccent }]}>
+          Approved • Awaiting Visit
+        </Text>
+      );
+    }
+
+    if (effectiveStatus === 'tested') {
+      return (
+        <Text style={[styles.processingText, { color: theme.textMuted }]}>
+          Sample Collected • In Processing
+        </Text>
+      );
+    }
+
+    if (effectiveStatus === 'encoded') {
+      return (
+        <Text style={[styles.processingText, { color: theme.textMuted }]}>
+          Results Under Validation...
+        </Text>
+      );
+    }
+
+    return (
+      <Text style={[styles.processingText, { color: theme.textMuted }]}>
+        Processing...
+      </Text>
+    );
   };
 
   return (
@@ -316,32 +402,7 @@ export const MedicalHistoryScreen: React.FC = () => {
                         {formatCurrency(app.payment_amount || 0)}
                       </Text>
 
-                      {effectiveStatus === 'released' ? (
-                        <TouchableOpacity
-                          style={[styles.viewReportBtn, { backgroundColor: theme.brandAccent }]}
-                          onPress={() =>
-                            navigation.navigate('AppointmentDetail', {
-                              appointmentId: app.id,
-                            })
-                          }>
-                          <Ionicons
-                            name="document-text-outline"
-                            size={12}
-                            color="#1C232D"
-                          />
-                          <Text style={styles.viewReportBtnText}>VIEW REPORT</Text>
-                        </TouchableOpacity>
-                      ) : isExpired ? (
-                        <Text style={[styles.processingText, { color: theme.danger }]}>
-                          Expired (Past 24-hr schedule)
-                        </Text>
-                      ) : (
-                        <Text style={[styles.processingText, { color: theme.textMuted }]}>
-                          {effectiveStatus === 'pending'
-                            ? 'Awaiting clinic review...'
-                            : 'Processing sample...'}
-                        </Text>
-                      )}
+                      {renderAppointmentFooterStatus(app)}
                     </View>
                   </Card>
                 );
@@ -516,7 +577,6 @@ export const MedicalHistoryScreen: React.FC = () => {
                               </Text>
                             ) : null}
                           </View>
-
                           <View style={{ flexDirection: 'row', gap: 6 }}>
                             <TouchableOpacity
                               onPress={() => openPreview(scan.file_path, scan.label)}
@@ -526,7 +586,6 @@ export const MedicalHistoryScreen: React.FC = () => {
                               ]}>
                               <Text style={styles.previewFileBtnText}>PREVIEW</Text>
                             </TouchableOpacity>
-
                             <TouchableOpacity
                               onPress={() => handleDownloadScan(scan.file_path, scan.label)}
                               style={[

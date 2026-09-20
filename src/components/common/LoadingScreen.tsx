@@ -6,29 +6,26 @@ import {
   Animated,
   Image,
 } from 'react-native';
-import { useTheme } from '../../hooks/useTheme';
-import { Typography, Spacing } from '../../constants/theme';
 
 interface LoadingScreenProps {
   message?: string;
 }
 
 export const LoadingScreen: React.FC<LoadingScreenProps> = ({ message }) => {
-  const theme = useTheme();
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Smooth infinite flickering pulse between 0% and 100% opacity
+    // Infinite flickering pulse from 0% to 100% opacity
     const flickerAnimation = Animated.loop(
       Animated.sequence([
         Animated.timing(opacityAnim, {
           toValue: 1,
-          duration: 800,
+          duration: 700,
           useNativeDriver: true,
         }),
         Animated.timing(opacityAnim, {
           toValue: 0,
-          duration: 800,
+          duration: 700,
           useNativeDriver: true,
         }),
       ])
@@ -40,10 +37,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ message }) => {
   }, [opacityAnim]);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bgMain }]}>
+    <View style={styles.container}>
       <Animated.View style={[styles.content, { opacity: opacityAnim }]}>
         {/* Medscreen Circular Clipped Logo */}
-        <View style={[styles.logoCircle, { borderColor: theme.brandAccent }]}>
+        <View style={styles.logoCircle}>
           <Image
             source={require('../../../assets/images/logo.jpg')}
             style={styles.logoImage}
@@ -52,12 +49,12 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ message }) => {
         </View>
 
         {/* Brand Name Title */}
-        <Text style={[styles.brandTitle, { color: theme.textMain }]}>
-          MED<Text style={{ color: theme.brandAccent }}>SCREEN</Text>
+        <Text style={styles.brandTitle}>
+          MED<Text style={styles.brandAccent}>SCREEN</Text>
         </Text>
 
         {message ? (
-          <Text style={[styles.messageText, { color: theme.textMuted }]}>
+          <Text style={styles.messageText}>
             {message}
           </Text>
         ) : null}
@@ -69,6 +66,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ message }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FFFFFF', // Pure white background
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -77,34 +75,41 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logoCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     borderWidth: 2.5,
+    borderColor: '#19D38C',
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#000',
-    shadowColor: '#000',
+    backgroundColor: '#000000',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.15,
     shadowRadius: 10,
-    elevation: 8,
+    elevation: 6,
   },
   logoImage: {
     width: '100%',
     height: '100%',
   },
   brandTitle: {
+    color: '#1C232D',
     fontSize: 22,
     fontWeight: '900',
     letterSpacing: 2,
-    marginTop: Spacing.md,
+    marginTop: 16,
     textTransform: 'uppercase',
   },
+  brandAccent: {
+    color: '#19D38C',
+  },
   messageText: {
-    fontSize: Typography.sizes.xs,
-    marginTop: Spacing.xs,
+    color: '#64748B',
+    fontSize: 12,
+    marginTop: 8,
     letterSpacing: 0.5,
+    fontWeight: '600',
   },
 });

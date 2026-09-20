@@ -37,7 +37,6 @@ export const appointmentsApi = {
 
   /**
    * Queries real-time slot occupancy and clinic schedule configuration for a given date.
-   * Route is '/check-slots' (apiClient baseURL already includes '/api').
    */
   checkSlots: async (
     date: string,
@@ -80,6 +79,7 @@ export const appointmentsApi = {
     formData: FormData
   ): Promise<{ success: boolean; message?: string }> => {
     formData.append('_method', 'PUT');
+
     const response = await apiClient.post<{ success: boolean; message?: string }>(
       `/appointments/${id}`,
       formData,
