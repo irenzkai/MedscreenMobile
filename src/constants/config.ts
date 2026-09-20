@@ -11,8 +11,10 @@ const SERVER_HOST = '192.168.43.173'; // <-- Put your computer's IPv4 address he
 const SERVER_PORT = '8000';
 
 export const CONFIG = {
-  API_BASE_URL: `http://${SERVER_HOST}:${SERVER_PORT}/api`,
-  WEB_BASE_URL: `http://${SERVER_HOST}:${SERVER_PORT}`,
+  // API_BASE_URL: `http://${SERVER_HOST}:${SERVER_PORT}/api`,
+  // WEB_BASE_URL: `http://${SERVER_HOST}:${SERVER_PORT}`,
+  API_BASE_URL: 'https://labappointment.onrender.com/api',
+  WEB_BASE_URL: 'https://labappointment.onrender.com',
   PSGC_BASE_URL: 'https://psgc.gitlab.io/api',
   APP_NAME: 'Medscreen Diagnostic Laboratory',
   SUPPORT_EMAIL: 'medscreen.lab@gmail.com',
