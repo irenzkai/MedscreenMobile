@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../hooks/useTheme';
 import { authApi } from '../../services/api/auth';
+import { apiClient, extractErrorMessage } from '../../services/api/client';
 import { Header } from '../../components/common/Header';
 import { Card } from '../../components/common/Card';
 import { Input } from '../../components/common/Input';
@@ -46,10 +47,11 @@ import {
   openVerifyResultOnWeb,
 } from '../../utils/externalLinks';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
+import { User } from '../../types';
 
 export const SettingsScreen: React.FC = () => {
   const theme = useTheme();
-  const { user, refreshUserProfile, logout, verifyOtp, sendOtp } = useAuth();
+  const { user, refreshUserProfile, logout, setUser, sendOtp, sendSmsOtp, verifyOtp } = useAuth();
   const scrollViewRef = useRef<ScrollView | null>(null);
   const { contentOffsetY, contentHeight, layoutHeight, handleScroll } = useScrollShortcut();
 
@@ -79,6 +81,36 @@ export const SettingsScreen: React.FC = () => {
   const [refreshingForm, setRefreshingForm] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  // Verification State Tracker (Directly aligned with Web)
+  const isOriginalEmailVerified = Boolean(user?.email_verified_at);
+  const isOriginalPhoneVerified = Boolean(user?.phone_verified_at);
+
+  const [emailVerifiedLocally, setEmailVerifiedLocally] = useState(isOriginalEmailVerified);
+  const [phoneVerifiedLocally, setPhoneVerifiedLocally] = useState(isOriginalPhoneVerified);
+
+  // Email OTP Modal States
+  const [emailVerifyModalVisible, setEmailVerifyModalVisible] = useState(false);
+  const [emailOtpDigits, setEmailOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [verifyingEmailOtp, setVerifyingEmailOtp] = useState(false);
+  const [sendingEmailOtp, setSendingEmailOtp] = useState(false);
+  const [emailCooldown, setEmailCooldown] = useState<number>(0);
+  const [emailOtpError, setEmailOtpError] = useState<string | null>(null);
+
+  // Phone SMS OTP Modal States
+  const [phoneVerifyModalVisible, setPhoneVerifyModalVisible] = useState(false);
+  const [smsOtpDigits, setSmsOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [verifyingPhoneOtp, setVerifyingPhoneOtp] = useState(false);
+  const [sendingPhoneOtp, setSendingPhoneOtp] = useState(false);
+  const [phoneCooldown, setPhoneCooldown] = useState<number>(0);
+  const [phoneOtpError, setPhoneOtpError] = useState<string | null>(null);
+
+  // Input refs for auto-focusing
+  const emailInputRefs = useRef<Array<TextInput | null>>([]);
+  const smsInputRefs = useRef<Array<TextInput | null>>([]);
+
+  // Flag to automatically resume profile submission once verified
+  const [pendingFormSubmit, setPendingFormSubmit] = useState(false);
+
   // Unified Modals State
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [successModalConfig, setSuccessModalConfig] = useState<{
@@ -86,12 +118,6 @@ export const SettingsScreen: React.FC = () => {
     title: string;
     message: string;
   }>({ visible: false, title: '', message: '' });
-
-  // Email Change Re-verification Modal States
-  const [emailVerifyModalVisible, setEmailVerifyModalVisible] = useState(false);
-  const [emailOtpDigits, setEmailOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
-  const [verifyingOtp, setVerifyingOtp] = useState(false);
-  const [otpError, setOtpError] = useState<string | null>(null);
 
   // Security Form States
   const [currentPassword, setCurrentPassword] = useState('');
@@ -128,6 +154,8 @@ export const SettingsScreen: React.FC = () => {
       setCity(currentUser.city || '');
       setBarangay(currentUser.barangay || '');
       setStreet(currentUser.street || '');
+      setEmailVerifiedLocally(Boolean(currentUser.email_verified_at));
+      setPhoneVerifiedLocally(Boolean(currentUser.phone_verified_at));
     }
   };
 
@@ -135,12 +163,23 @@ export const SettingsScreen: React.FC = () => {
     populateUserData(user);
   }, [user]);
 
+  // Cooldown timer loop
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (emailCooldown > 0 || phoneCooldown > 0) {
+      interval = setInterval(() => {
+        setEmailCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+        setPhoneCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [emailCooldown, phoneCooldown]);
+
   // Reset to saved profile details
   const handleResetProfileForm = async () => {
     setRefreshingForm(true);
     setFieldErrors({});
     setErrorBanner(null);
-
     try {
       await refreshUserProfile();
       populateUserData(user);
@@ -156,6 +195,164 @@ export const SettingsScreen: React.FC = () => {
     }
   };
 
+  // --- OTP INPUT HELPERS ---
+  const handleDigitChange = (val: string, index: number, channel: 'email' | 'sms') => {
+    const clean = val.replace(/[^0-9]/g, '');
+    const isEmail = channel === 'email';
+    const digits = isEmail ? [...emailOtpDigits] : [...smsOtpDigits];
+    const refs = isEmail ? emailInputRefs : smsInputRefs;
+
+    digits[index] = clean.slice(-1);
+    if (isEmail) {
+      setEmailOtpDigits(digits);
+      if (emailOtpError) setEmailOtpError(null);
+    } else {
+      setSmsOtpDigits(digits);
+      if (phoneOtpError) setPhoneOtpError(null);
+    }
+
+    if (clean && index < 5) {
+      refs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleKeyPress = (e: any, index: number, channel: 'email' | 'sms') => {
+    const isEmail = channel === 'email';
+    const digits = isEmail ? emailOtpDigits : smsOtpDigits;
+    const refs = isEmail ? emailInputRefs : smsInputRefs;
+
+    if (e.nativeEvent.key === 'Backspace' && !digits[index] && index > 0) {
+      refs.current[index - 1]?.focus();
+    }
+  };
+
+  // --- DISPATCH OTP CODES ---
+  const triggerSendEmailOtp = async () => {
+    if (emailCooldown > 0 || sendingEmailOtp) return;
+    const targetEmail = email.trim().toLowerCase();
+    if (!targetEmail) return;
+
+    setSendingEmailOtp(true);
+    setEmailOtpError(null);
+    try {
+      const res = await sendOtp(targetEmail);
+      if (res.success) {
+        setEmailCooldown(30);
+      } else {
+        setEmailOtpError(res.message || 'Could not send verification code.');
+      }
+    } catch (err: any) {
+      setEmailOtpError(extractErrorMessage(err));
+    } finally {
+      setSendingEmailOtp(false);
+    }
+  };
+
+  const triggerSendPhoneOtp = async () => {
+    if (phoneCooldown > 0 || sendingPhoneOtp) return;
+    const targetPhone = formatToStandardPhone(phoneDisplay);
+    if (!targetPhone) return;
+
+    setSendingPhoneOtp(true);
+    setPhoneOtpError(null);
+    try {
+      const res = await sendSmsOtp(targetPhone);
+      if (res.success) {
+        setPhoneCooldown(30);
+      } else {
+        setPhoneOtpError(res.message || 'Could not send SMS verification code.');
+      }
+    } catch (err: any) {
+      setPhoneOtpError(extractErrorMessage(err));
+    } finally {
+      setSendingPhoneOtp(false);
+    }
+  };
+
+  const openProfileVerifyModal = (type: 'email' | 'phone') => {
+    if (type === 'email') {
+      setEmailOtpDigits(['', '', '', '', '', '']);
+      setEmailOtpError(null);
+      setEmailVerifyModalVisible(true);
+      triggerSendEmailOtp();
+      setTimeout(() => emailInputRefs.current[0]?.focus(), 200);
+    } else {
+      setSmsOtpDigits(['', '', '', '', '', '']);
+      setPhoneOtpError(null);
+      setPhoneVerifyModalVisible(true);
+      triggerSendPhoneOtp();
+      setTimeout(() => smsInputRefs.current[0]?.focus(), 200);
+    }
+  };
+
+  // --- VERIFY OTP SUBMITTERS ---
+  const submitProfileEmailOtp = async () => {
+    const fullOtp = emailOtpDigits.join('');
+    if (fullOtp.length !== 6) {
+      setEmailOtpError('Please enter all 6 digits of the code.');
+      return;
+    }
+
+    setVerifyingEmailOtp(true);
+    setEmailOtpError(null);
+    try {
+      const targetEmail = email.trim().toLowerCase();
+      const res = await verifyOtp(fullOtp, targetEmail, 'email');
+      if (res.success) {
+        setEmailVerifiedLocally(true);
+        setEmailVerifyModalVisible(false);
+
+        if (pendingFormSubmit) {
+          const currentStandardPhone = formatToStandardPhone(phoneDisplay);
+          const phoneChanged = currentStandardPhone !== user?.phone;
+          if (phoneChanged && !phoneVerifiedLocally) {
+            openProfileVerifyModal('phone');
+            return;
+          }
+          await executeProfileSave(targetEmail);
+          setPendingFormSubmit(false);
+        }
+      } else {
+        setEmailOtpError(res.message || 'Incorrect or expired verification code.');
+      }
+    } catch (err: any) {
+      setEmailOtpError(extractErrorMessage(err));
+    } finally {
+      setVerifyingEmailOtp(false);
+    }
+  };
+
+  const submitProfilePhoneOtp = async () => {
+    const fullOtp = smsOtpDigits.join('');
+    if (fullOtp.length !== 6) {
+      setPhoneOtpError('Please enter all 6 digits of the SMS code.');
+      return;
+    }
+
+    setVerifyingPhoneOtp(true);
+    setPhoneOtpError(null);
+    try {
+      const targetPhone = formatToStandardPhone(phoneDisplay);
+      const res = await verifyOtp(fullOtp, targetPhone, 'sms');
+      if (res.success) {
+        setPhoneVerifiedLocally(true);
+        setPhoneVerifyModalVisible(false);
+
+        if (pendingFormSubmit) {
+          await executeProfileSave(email.trim().toLowerCase());
+          setPendingFormSubmit(false);
+        }
+      } else {
+        setPhoneOtpError(res.message || 'Incorrect or expired SMS verification code.');
+      }
+    } catch (err: any) {
+      setPhoneOtpError(extractErrorMessage(err));
+    } finally {
+      setVerifyingPhoneOtp(false);
+    }
+  };
+
+  // --- SAVE PROFILE ---
   const executeProfileSave = async (targetEmail: string) => {
     setSavingProfile(true);
     try {
@@ -224,49 +421,33 @@ export const SettingsScreen: React.FC = () => {
     if (!barangay.trim()) errs.barangay = 'Barangay is required.';
 
     setFieldErrors(errs);
-
     if (Object.keys(errs).length > 0) {
-      showError('Please complete all required fields correctly.');
+      showError('Please complete all required fields correctly before saving changes.');
       return;
     }
 
-    if (user && email.trim().toLowerCase() !== user.email.toLowerCase()) {
-      try {
-        setSavingProfile(true);
-        await sendOtp(email.trim().toLowerCase());
-        setSavingProfile(false);
-        setEmailOtpDigits(['', '', '', '', '', '']);
-        setOtpError(null);
-        setEmailVerifyModalVisible(true);
-      } catch {
-        setSavingProfile(false);
-        showError('Could not send verification code to your new email.');
-      }
+    // Intercept unverified email changes
+    const cleanEmail = email.trim().toLowerCase();
+    const emailChanged = user && cleanEmail !== user.email.toLowerCase();
+    if (emailChanged && (!emailVerifiedLocally || cleanEmail !== user?.email.toLowerCase())) {
+      setPendingFormSubmit(true);
+      openProfileVerifyModal('email');
       return;
     }
 
-    await executeProfileSave(user?.email || email);
+    // Intercept unverified phone changes
+    const standardPhone = formatToStandardPhone(phoneDisplay);
+    const phoneChanged = user && standardPhone !== user.phone;
+    if (phoneChanged && (!phoneVerifiedLocally || standardPhone !== user?.phone)) {
+      setPendingFormSubmit(true);
+      openProfileVerifyModal('phone');
+      return;
+    }
+
+    await executeProfileSave(cleanEmail);
   };
 
-  const handleVerifyNewEmailOtp = async () => {
-    const fullOtp = emailOtpDigits.join('');
-    if (fullOtp.length !== 6) {
-      setOtpError('Please enter all 6 digits.');
-      return;
-    }
-    setVerifyingOtp(true);
-    setOtpError(null);
-    const res = await verifyOtp(fullOtp, email.trim().toLowerCase());
-    setVerifyingOtp(false);
-
-    if (res.success) {
-      setEmailVerifyModalVisible(false);
-      await executeProfileSave(email.trim().toLowerCase());
-    } else {
-      setOtpError(res.message || 'Incorrect verification code. Please try again.');
-    }
-  };
-
+  // --- PASSWORD UPDATE ---
   const handleUpdatePassword = async () => {
     setErrorBanner(null);
     const errs: Record<string, string> = {};
@@ -276,12 +457,10 @@ export const SettingsScreen: React.FC = () => {
     }
     const passErr = validatePassword(newPassword);
     if (passErr) errs.newPassword = passErr;
-
     const confErr = validatePasswordConfirmation(newPassword, confirmPassword);
     if (confErr) errs.confirmPassword = confErr;
 
     setFieldErrors(errs);
-
     if (Object.keys(errs).length > 0) {
       showError('Please correct password fields before proceeding.');
       return;
@@ -294,6 +473,7 @@ export const SettingsScreen: React.FC = () => {
         password: newPassword,
         password_confirmation: confirmPassword,
       });
+
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -303,12 +483,13 @@ export const SettingsScreen: React.FC = () => {
         message: 'Your portal login password has been securely updated.',
       });
     } catch (err: any) {
-      showError(err?.message || 'Could not update password. Please check your current password.');
+      showError(err?.message || extractErrorMessage(err) || 'Could not update password. Please check your current password.');
     } finally {
       setUpdatingPassword(false);
     }
   };
 
+  // --- ACCOUNT DEACTIVATION ---
   const handleDeleteAccount = async () => {
     if (!deletePassword.trim()) {
       showError('Please enter your password to confirm account deactivation.');
@@ -327,6 +508,12 @@ export const SettingsScreen: React.FC = () => {
   };
 
   const liveAge = birthdate ? calculateAge(birthdate) : null;
+
+  // Real-time verification status check on input change
+  const currentEmailIsVerified =
+    emailVerifiedLocally && email.trim().toLowerCase() === user?.email.toLowerCase();
+  const currentPhoneIsVerified =
+    phoneVerifiedLocally && formatToStandardPhone(phoneDisplay) === user?.phone;
 
   return (
     <KeyboardAvoidingView
@@ -443,6 +630,7 @@ export const SettingsScreen: React.FC = () => {
                 <Text style={[styles.cardTitle, { color: theme.brandAccent, marginBottom: 0 }]}>
                   Personal Information
                 </Text>
+
                 <TouchableOpacity
                   onPress={handleResetProfileForm}
                   disabled={refreshingForm}
@@ -479,9 +667,7 @@ export const SettingsScreen: React.FC = () => {
               />
 
               <View style={styles.middleNameHeader}>
-                <Text style={[styles.smallLabel, { color: theme.textMuted }]}>
-                  MIDDLE NAME
-                </Text>
+                <Text style={[styles.smallLabel, { color: theme.textMuted }]}>MIDDLE NAME</Text>
                 <View style={styles.switchRow}>
                   <Text style={[styles.noneText, { color: theme.textMuted }]}>None</Text>
                   <Switch
@@ -497,6 +683,7 @@ export const SettingsScreen: React.FC = () => {
                   />
                 </View>
               </View>
+
               {!noMiddleName && (
                 <Input
                   value={middleName}
@@ -531,33 +718,94 @@ export const SettingsScreen: React.FC = () => {
                 error={fieldErrors.suffix}
               />
 
-              <Input
-                label="Email Address"
-                value={email}
-                onChangeText={(t) => {
-                  setEmail(t);
-                  if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: '' }));
-                }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                helperText="Modifying email requires OTP verification before saving."
-                error={fieldErrors.email}
-                isRequired
-              />
+              {/* Safety notice banner */}
+              <View
+                style={[
+                  styles.safetyNoticeBox,
+                  { backgroundColor: theme.surfaceSubtle, borderColor: theme.brandAccent },
+                ]}>
+                <Ionicons name="shield-checkmark-outline" size={16} color={theme.brandAccent} />
+                <Text style={[styles.safetyNoticeText, { color: theme.textMuted }]}>
+                  <Text style={{ fontWeight: '800', color: theme.textMain }}>Safety Notice: </Text>
+                  Modifying your registered email or phone number will automatically reset its verification status and require re-verification.
+                </Text>
+              </View>
 
-              <Input
-                label="Phone Number"
-                prefixText="09"
-                value={phoneDisplay}
-                onChangeText={(t) => {
-                  setPhoneDisplay(t.replace(/[^0-9]/g, '').slice(0, 9));
-                  if (fieldErrors.phone) setFieldErrors((prev) => ({ ...prev, phone: '' }));
-                }}
-                keyboardType="number-pad"
-                error={fieldErrors.phone}
-                isRequired
-              />
+              {/* Email Address with Verification Badge & Verify Trigger */}
+              <View style={styles.fieldSection}>
+                <View style={styles.badgeHeaderRow}>
+                  <Text style={[styles.smallLabel, { color: theme.textMuted }]}>
+                    EMAIL ADDRESS *
+                  </Text>
+                  <View style={styles.badgeWrap}>
+                    {currentEmailIsVerified ? (
+                      <View style={[styles.verifiedBadge, { backgroundColor: 'rgba(25, 211, 140, 0.12)' }]}>
+                        <Ionicons name="checkmark-circle" size={11} color={theme.success} />
+                        <Text style={[styles.verifiedBadgeText, { color: theme.success }]}>VERIFIED</Text>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={[styles.unverifiedBadge, { backgroundColor: 'rgba(255, 193, 7, 0.12)' }]}>
+                          <Ionicons name="alert-circle" size={11} color={theme.warning} />
+                          <Text style={[styles.unverifiedBadgeText, { color: theme.warning }]}>UNVERIFIED</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => openProfileVerifyModal('email')} hitSlop={6}>
+                          <Text style={[styles.verifyNowLink, { color: theme.brandAccent }]}>Verify Now</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <Input
+                  value={email}
+                  onChangeText={(t) => {
+                    setEmail(t);
+                    if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: '' }));
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  error={fieldErrors.email}
+                />
+              </View>
 
+              {/* Phone Number with Verification Badge & Verify Trigger */}
+              <View style={styles.fieldSection}>
+                <View style={styles.badgeHeaderRow}>
+                  <Text style={[styles.smallLabel, { color: theme.textMuted }]}>
+                    PHONE NUMBER *
+                  </Text>
+                  <View style={styles.badgeWrap}>
+                    {currentPhoneIsVerified ? (
+                      <View style={[styles.verifiedBadge, { backgroundColor: 'rgba(25, 211, 140, 0.12)' }]}>
+                        <Ionicons name="checkmark-circle" size={11} color={theme.success} />
+                        <Text style={[styles.verifiedBadgeText, { color: theme.success }]}>VERIFIED</Text>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={[styles.unverifiedBadge, { backgroundColor: 'rgba(255, 193, 7, 0.12)' }]}>
+                          <Ionicons name="alert-circle" size={11} color={theme.warning} />
+                          <Text style={[styles.unverifiedBadgeText, { color: theme.warning }]}>UNVERIFIED</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => openProfileVerifyModal('phone')} hitSlop={6}>
+                          <Text style={[styles.verifyNowLink, { color: theme.brandAccent }]}>Verify Now</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <Input
+                  prefixText="09"
+                  value={phoneDisplay}
+                  onChangeText={(t) => {
+                    setPhoneDisplay(t.replace(/[^0-9]/g, '').slice(0, 9));
+                    if (fieldErrors.phone) setFieldErrors((prev) => ({ ...prev, phone: '' }));
+                  }}
+                  keyboardType="number-pad"
+                  error={fieldErrors.phone}
+                />
+              </View>
+
+              {/* Birthdate */}
               <View style={styles.bdayFieldWrapper}>
                 <Text style={[styles.smallLabel, { color: theme.textMuted, marginBottom: 4 }]}>
                   BIRTHDATE *
@@ -601,6 +849,7 @@ export const SettingsScreen: React.FC = () => {
                 ) : null}
               </View>
 
+              {/* Home Address (PSGC) */}
               <Text
                 style={[
                   styles.cardTitle,
@@ -647,8 +896,7 @@ export const SettingsScreen: React.FC = () => {
                 Delete Account
               </Text>
               <Text style={[styles.dangerDesc, { color: theme.textMuted }]}>
-                Deactivating your account places your medical records in a 10-year regulatory
-                archive before permanent destruction.
+                Deactivating your account places your medical records in a 10-year regulatory archive before permanent destruction.
               </Text>
               <Button
                 title="Deactivate Account"
@@ -815,7 +1063,7 @@ export const SettingsScreen: React.FC = () => {
         onClose={() => setSuccessModalConfig((prev) => ({ ...prev, visible: false }))}
       />
 
-      {/* Email Change Re-verification Modal */}
+      {/* EMAIL OTP VERIFICATION MODAL */}
       <Modal
         visible={emailVerifyModalVisible}
         transparent
@@ -825,24 +1073,23 @@ export const SettingsScreen: React.FC = () => {
           <Card style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.brandAccent }]}>
-                Verify New Email
+                Email Verification Code
               </Text>
-              <TouchableOpacity
-                onPress={() => setEmailVerifyModalVisible(false)}
-                hitSlop={10}>
+              <TouchableOpacity onPress={() => setEmailVerifyModalVisible(false)} hitSlop={10}>
                 <Ionicons name="close" size={24} color={theme.textMuted} />
               </TouchableOpacity>
             </View>
+
             <Text style={[styles.modalDesc, { color: theme.textMuted }]}>
               Enter the 6-digit verification code sent to{' '}
               <Text style={{ color: theme.brandAccent, fontWeight: '700' }}>{email}</Text> to
-              confirm this change before saving your profile.
+              confirm this email address.
             </Text>
 
-            {otpError ? (
+            {emailOtpError ? (
               <NoticeBox
                 type="danger"
-                message={otpError}
+                message={emailOtpError}
                 style={{ marginVertical: Spacing.sm }}
               />
             ) : null}
@@ -850,14 +1097,13 @@ export const SettingsScreen: React.FC = () => {
             <View style={styles.otpRow}>
               {emailOtpDigits.map((digit, idx) => (
                 <TextInput
-                  key={idx}
-                  value={digit}
-                  onChangeText={(val) => {
-                    const clean = val.replace(/[^0-9]/g, '').slice(-1);
-                    const updated = [...emailOtpDigits];
-                    updated[idx] = clean;
-                    setEmailOtpDigits(updated);
+                  key={`email-otp-${idx}`}
+                  ref={(el) => {
+                    emailInputRefs.current[idx] = el;
                   }}
+                  value={digit}
+                  onChangeText={(val) => handleDigitChange(val, idx, 'email')}
+                  onKeyPress={(e) => handleKeyPress(e, idx, 'email')}
                   keyboardType="number-pad"
                   maxLength={1}
                   style={[
@@ -873,12 +1119,110 @@ export const SettingsScreen: React.FC = () => {
             </View>
 
             <Button
-              title="Confirm & Save Profile"
+              title="Submit Code"
               variant="primary"
-              loading={verifyingOtp}
-              onPress={handleVerifyNewEmailOtp}
-              style={{ marginTop: Spacing.md }}
+              loading={verifyingEmailOtp}
+              onPress={submitProfileEmailOtp}
+              style={{ marginTop: Spacing.sm }}
             />
+
+            <View style={styles.resendRow}>
+              <Text style={[styles.resendText, { color: theme.textMuted }]}>
+                Didn't receive the email code?{' '}
+              </Text>
+              <TouchableOpacity onPress={triggerSendEmailOtp} disabled={emailCooldown > 0 || sendingEmailOtp}>
+                <Text
+                  style={[
+                    styles.resendLink,
+                    { color: emailCooldown > 0 ? theme.textMuted : theme.brandAccent },
+                  ]}>
+                  {emailCooldown > 0 ? `Resend in ${emailCooldown}s` : 'Send Code'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Card>
+        </View>
+      </Modal>
+
+      {/* PHONE SMS OTP VERIFICATION MODAL */}
+      <Modal
+        visible={phoneVerifyModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPhoneVerifyModalVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <Card style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.brandAccent }]}>
+                Phone SMS Verification
+              </Text>
+              <TouchableOpacity onPress={() => setPhoneVerifyModalVisible(false)} hitSlop={10}>
+                <Ionicons name="close" size={24} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.modalDesc, { color: theme.textMuted }]}>
+              Enter the 6-digit SMS verification code dispatched to{' '}
+              <Text style={{ color: theme.brandAccent, fontWeight: '700' }}>
+                {formatToStandardPhone(phoneDisplay)}
+              </Text>{' '}
+              to verify this mobile number.
+            </Text>
+
+            {phoneOtpError ? (
+              <NoticeBox
+                type="danger"
+                message={phoneOtpError}
+                style={{ marginVertical: Spacing.sm }}
+              />
+            ) : null}
+
+            <View style={styles.otpRow}>
+              {smsOtpDigits.map((digit, idx) => (
+                <TextInput
+                  key={`phone-otp-${idx}`}
+                  ref={(el) => {
+                    smsInputRefs.current[idx] = el;
+                  }}
+                  value={digit}
+                  onChangeText={(val) => handleDigitChange(val, idx, 'sms')}
+                  onKeyPress={(e) => handleKeyPress(e, idx, 'sms')}
+                  keyboardType="number-pad"
+                  maxLength={1}
+                  style={[
+                    styles.otpBox,
+                    {
+                      backgroundColor: theme.bgCard,
+                      borderColor: digit ? theme.brandAccent : theme.borderColor,
+                      color: theme.textMain,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+
+            <Button
+              title="Verify Phone Code"
+              variant="primary"
+              loading={verifyingPhoneOtp}
+              onPress={submitProfilePhoneOtp}
+              style={{ marginTop: Spacing.sm }}
+            />
+
+            <View style={styles.resendRow}>
+              <Text style={[styles.resendText, { color: theme.textMuted }]}>
+                Didn't receive the SMS code?{' '}
+              </Text>
+              <TouchableOpacity onPress={triggerSendPhoneOtp} disabled={phoneCooldown > 0 || sendingPhoneOtp}>
+                <Text
+                  style={[
+                    styles.resendLink,
+                    { color: phoneCooldown > 0 ? theme.textMuted : theme.brandAccent },
+                  ]}>
+                  {phoneCooldown > 0 ? `Resend in ${phoneCooldown}s` : 'Send SMS Code'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </Card>
         </View>
       </Modal>
@@ -985,6 +1329,64 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
+  safetyNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  safetyNoticeText: {
+    fontSize: Typography.sizes.xs - 1,
+    flex: 1,
+    lineHeight: 16,
+  },
+  fieldSection: {
+    marginBottom: Spacing.xs,
+  },
+  badgeHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  badgeWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+  },
+  verifiedBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  unverifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+  },
+  unverifiedBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  verifyNowLink: {
+    fontSize: 10,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
   bdayFieldWrapper: { marginBottom: Spacing.md },
   bdayTrigger: {
     flexDirection: 'row',
@@ -1056,6 +1458,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 20,
     fontWeight: '800',
+  },
+  resendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Spacing.md,
+  },
+  resendText: { fontSize: Typography.sizes.xs },
+  resendLink: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
   modalActions: { alignItems: 'center', marginTop: Spacing.sm },
 });

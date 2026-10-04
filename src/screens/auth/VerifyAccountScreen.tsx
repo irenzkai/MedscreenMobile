@@ -16,37 +16,58 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthStackParamList } from '../../navigation/AuthNavigator';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../hooks/useTheme';
-import { apiClient } from '../../services/api/client';
+import { apiClient, extractErrorMessage } from '../../services/api/client';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { Input } from '../../components/common/Input';
 import { NoticeBox } from '../../components/common/NoticeBox';
 import { validateEmail } from '../../utils/validators';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
+import { User } from '../../types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'VerifyAccount'>;
+
+type VerificationTab = 'link' | 'email_otp' | 'sms_otp';
 
 export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { user, verifyOtp, sendOtp, changeUnverifiedEmail, logout } = useAuth();
+  const { user, sendOtp, changeUnverifiedEmail, logout, setUser, refreshUserProfile } = useAuth();
   const scrollViewRef = useRef<ScrollView | null>(null);
 
   const targetEmail = route.params?.email || user?.email || '';
-  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const userPhone = user?.phone || '';
+
+  const [activeTab, setActiveTab] = useState<VerificationTab>('link');
+
+  // OTP inputs for Email and SMS channels
+  const [emailOtpDigits, setEmailOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [smsOtpDigits, setSmsOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+
+  // Loading states
   const [loading, setLoading] = useState(false);
   const [sendingLink, setSendingLink] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState<number>(30);
+  const [resendingEmailOtp, setResendingEmailOtp] = useState(false);
+  const [resendingSmsOtp, setResendingSmsOtp] = useState(false);
+  const [changingEmail, setChangingEmail] = useState(false);
+
+  // Independent 30s cooldowns per channel
+  const [linkCooldown, setLinkCooldown] = useState<number>(0);
+  const [emailCooldown, setEmailCooldown] = useState<number>(30);
+  const [smsCooldown, setSmsCooldown] = useState<number>(0);
+
+  // Notification banners
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Email correction state
+  // Change Email accordion
   const [showChangeEmail, setShowChangeEmail] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newEmailError, setNewEmailError] = useState<string | null>(null);
-  const [changingEmail, setChangingEmail] = useState(false);
 
-  const inputRefs = useRef<Array<TextInput | null>>([]);
+  // Input refs for automatic focus progression
+  const emailInputRefs = useRef<Array<TextInput | null>>([]);
+  const smsInputRefs = useRef<Array<TextInput | null>>([]);
 
   const showError = (msg: string) => {
     setErrorMsg(msg);
@@ -64,34 +85,108 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
     }, 50);
   };
 
+  // Cooldown countdown tick
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    if (resendCooldown > 0) {
-      interval = setInterval(() => setResendCooldown((prev) => prev - 1), 1000);
+    if (linkCooldown > 0 || emailCooldown > 0 || smsCooldown > 0) {
+      interval = setInterval(() => {
+        setLinkCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+        setEmailCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+        setSmsCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
     }
     return () => clearInterval(interval);
-  }, [resendCooldown]);
+  }, [linkCooldown, emailCooldown, smsCooldown]);
 
-  const handleDigitChange = (val: string, index: number) => {
+  const handleDigitChange = (val: string, index: number, channel: 'email' | 'sms') => {
     const clean = val.replace(/[^0-9]/g, '');
-    const updated = [...otpDigits];
-    updated[index] = clean.slice(-1);
-    setOtpDigits(updated);
+    const isEmail = channel === 'email';
+    const digits = isEmail ? [...emailOtpDigits] : [...smsOtpDigits];
+    const refs = isEmail ? emailInputRefs : smsInputRefs;
+
+    digits[index] = clean.slice(-1);
+    if (isEmail) setEmailOtpDigits(digits);
+    else setSmsOtpDigits(digits);
+
     if (errorMsg) setErrorMsg(null);
-
     if (clean && index < 5) {
-      inputRefs.current[index + 1]?.focus();
+      refs.current[index + 1]?.focus();
     }
   };
 
-  const handleKeyPress = (e: any, index: number) => {
-    if (e.nativeEvent.key === 'Backspace' && !otpDigits[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
+  const handleKeyPress = (e: any, index: number, channel: 'email' | 'sms') => {
+    const isEmail = channel === 'email';
+    const digits = isEmail ? emailOtpDigits : smsOtpDigits;
+    const refs = isEmail ? emailInputRefs : smsInputRefs;
+
+    if (e.nativeEvent.key === 'Backspace' && !digits[index] && index > 0) {
+      refs.current[index - 1]?.focus();
     }
   };
 
-  const handleVerify = async () => {
-    const fullOtp = otpDigits.join('');
+  // 1. Send Email Verification Link
+  const handleSendEmailLink = async () => {
+    if (linkCooldown > 0 || sendingLink) return;
+    setErrorMsg(null);
+    setSendingLink(true);
+    try {
+      await apiClient.post('/email/verification-notification');
+      showSuccess(`A fresh verification link has been successfully dispatched to ${targetEmail}.`);
+      setLinkCooldown(30);
+    } catch (err: any) {
+      showError(extractErrorMessage(err) || 'Unable to send verification link. Please use an OTP code.');
+    } finally {
+      setSendingLink(false);
+    }
+  };
+
+  // 2. Resend Email OTP Code
+  const handleResendEmailOtp = async () => {
+    if (emailCooldown > 0 || resendingEmailOtp) return;
+    setErrorMsg(null);
+    setResendingEmailOtp(true);
+    try {
+      const res = await sendOtp(targetEmail);
+      if (res.success) {
+        showSuccess('A secure 6-digit One-Time Password has been dispatched to your email address.');
+        setEmailCooldown(30);
+      } else {
+        showError(res.message || 'Failed to dispatch verification code.');
+      }
+    } catch (err: any) {
+      showError(extractErrorMessage(err));
+    } finally {
+      setResendingEmailOtp(false);
+    }
+  };
+
+  // 3. Resend SMS OTP Code
+  const handleResendSmsOtp = async () => {
+    if (smsCooldown > 0 || resendingSmsOtp) return;
+    if (!userPhone) {
+      showError('No mobile phone number registered on file for your account.');
+      return;
+    }
+    setErrorMsg(null);
+    setResendingSmsOtp(true);
+    try {
+      const res = await apiClient.post('/sms/verification-otp', {
+        phone: userPhone,
+        channel: 'sms',
+      });
+      showSuccess(res.data?.message || 'A secure 6-digit SMS verification code has been dispatched to your mobile phone.');
+      setSmsCooldown(30);
+    } catch (err: any) {
+      showError(extractErrorMessage(err) || 'Failed to dispatch SMS verification code.');
+    } finally {
+      setResendingSmsOtp(false);
+    }
+  };
+
+  // 4. Verify OTP Code (Email or SMS)
+  const handleVerifyOtp = async (channel: 'email' | 'sms') => {
+    const digits = channel === 'email' ? emailOtpDigits : smsOtpDigits;
+    const fullOtp = digits.join('');
     if (fullOtp.length !== 6) {
       showError('Please enter all 6 digits of the verification code.');
       return;
@@ -99,40 +194,34 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
 
     setErrorMsg(null);
     setLoading(true);
-    const res = await verifyOtp(fullOtp, targetEmail);
-    setLoading(false);
-
-    if (!res.success) {
-      showError(res.message || 'Invalid or expired verification code. Tap "Resend Code" for a fresh OTP.');
-    }
-  };
-
-  const handleResendOtp = async () => {
-    if (resendCooldown > 0) return;
-    setErrorMsg(null);
-    const res = await sendOtp(targetEmail);
-
-    if (res.success) {
-      setResendCooldown(30);
-      showSuccess('A fresh 6-digit verification code was sent to your email.');
-    } else {
-      showError(res.message || 'Failed to dispatch verification code.');
-    }
-  };
-
-  // Option to send traditional verification email link
-  const handleSendEmailLink = async () => {
-    setSendingLink(true);
     try {
-      await apiClient.post('/email/verification-notification');
-      showSuccess(`A verification link has been sent to ${targetEmail}. Please check your inbox or spam.`);
-    } catch {
-      showError('Unable to send verification link. Please use the OTP code above.');
+      const res = await apiClient.post('/verify-otp', {
+        otp: fullOtp.trim(),
+        channel,
+      });
+
+      if (res.data?.success) {
+        showSuccess(res.data.message || 'Account successfully verified!');
+        if (user) {
+          const updatedUser: User = {
+            ...user,
+            email_verified_at: channel === 'email' ? new Date().toISOString() : user.email_verified_at,
+            phone_verified_at: channel === 'sms' ? new Date().toISOString() : user.phone_verified_at,
+          };
+          setUser(updatedUser);
+        }
+        await refreshUserProfile();
+      } else {
+        showError(res.data?.message || 'The entered verification code is incorrect or expired.');
+      }
+    } catch (err: any) {
+      showError(extractErrorMessage(err));
     } finally {
-      setSendingLink(false);
+      setLoading(false);
     }
   };
 
+  // 5. Update Email
   const handleUpdateEmail = async () => {
     setNewEmailError(null);
     const emailErr = validateEmail(newEmail);
@@ -141,21 +230,20 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
       showError(emailErr);
       return;
     }
-
     setChangingEmail(true);
     const res = await changeUnverifiedEmail(newEmail);
     setChangingEmail(false);
-
     if (res.success) {
       setShowChangeEmail(false);
       setNewEmail('');
-      setResendCooldown(30);
+      setEmailCooldown(30);
       showSuccess('Your registered email was updated and a new verification code was dispatched.');
     } else {
       showError(res.message || 'Could not update email address.');
     }
   };
 
+  // 6. Logout / Cancel & Exit
   const handleCancelAndExit = () => {
     Alert.alert(
       'Sign Out',
@@ -173,6 +261,32 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
     );
   };
 
+  // Dynamic header copy based on active tab
+  const getHeaderMeta = () => {
+    switch (activeTab) {
+      case 'link':
+        return {
+          icon: 'link-outline' as const,
+          title: 'Email Activation Link',
+          subtitle: 'Click the secure sign-off link sent to your email inbox.',
+        };
+      case 'email_otp':
+        return {
+          icon: 'mail-unread-outline' as const,
+          title: 'Email Verification Code',
+          subtitle: 'Enter the 6-digit dynamic code dispatched to your email.',
+        };
+      case 'sms_otp':
+        return {
+          icon: 'chatbubble-ellipses-outline' as const,
+          title: 'Mobile SMS OTP',
+          subtitle: 'Enter the 6-digit text message code sent to your phone.',
+        };
+    }
+  };
+
+  const headerMeta = getHeaderMeta();
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -188,30 +302,25 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
         ]}
         keyboardShouldPersistTaps="handled">
         <Card style={styles.card}>
+          {/* Header Icon & Title */}
           <View style={[styles.iconCircle, { backgroundColor: theme.surfaceSubtle }]}>
-            <Ionicons name="mail-unread-outline" size={32} color={theme.brandAccent} />
+            <Ionicons name={headerMeta.icon} size={30} color={theme.brandAccent} />
           </View>
 
-          <Text style={[styles.title, { color: theme.textMain }]}>Verify Your Account</Text>
-          <Text style={[styles.subtitle, { color: theme.textMuted }]}>
-            Enter the 6-digit One-Time Password (OTP) dispatched to{' '}
-            <Text style={{ color: theme.brandAccent, fontWeight: '700' }}>
-              {targetEmail}
-            </Text>
-            .
-          </Text>
+          <Text style={[styles.title, { color: theme.textMain }]}>{headerMeta.title}</Text>
+          <Text style={[styles.subtitle, { color: theme.textMuted }]}>{headerMeta.subtitle}</Text>
 
-          {/* Success Notice */}
+          {/* Dynamic In-Page Notifications */}
           {successMsg ? (
             <NoticeBox
               type="success"
+              title="Notification Dispatched"
               message={successMsg}
               onClose={() => setSuccessMsg(null)}
               style={{ marginBottom: Spacing.md }}
             />
           ) : null}
 
-          {/* Dynamic Error Notice */}
           {errorMsg ? (
             <NoticeBox
               type="danger"
@@ -221,85 +330,276 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
             />
           ) : null}
 
-          {/* 6-Digit OTP Boxes */}
-          <View style={styles.otpRow}>
-            {otpDigits.map((digit, idx) => (
-              <TextInput
-                key={idx}
-                ref={(el) => {
-                  inputRefs.current[idx] = el;
-                }}
-                value={digit}
-                onChangeText={(val) => handleDigitChange(val, idx)}
-                onKeyPress={(e) => handleKeyPress(e, idx)}
-                keyboardType="number-pad"
-                maxLength={1}
-                style={[
-                  styles.otpBox,
-                  {
-                    backgroundColor: theme.bgCard,
-                    borderColor: digit
-                      ? theme.brandAccent
-                      : errorMsg
-                      ? theme.danger
-                      : theme.borderColor,
-                    color: theme.textMain,
-                  },
-                ]}
+          {/* Three Verification Tabs */}
+          <View style={styles.tabPillsRow}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                setActiveTab('link');
+                setErrorMsg(null);
+              }}
+              style={[
+                styles.tabPill,
+                {
+                  backgroundColor: activeTab === 'link' ? theme.brandAccent : theme.bgCard,
+                  borderColor: activeTab === 'link' ? theme.brandAccent : theme.borderColor,
+                },
+              ]}>
+              <Ionicons
+                name="link-outline"
+                size={13}
+                color={activeTab === 'link' ? '#1C232D' : theme.textMuted}
+                style={{ marginRight: 4 }}
               />
-            ))}
-          </View>
-
-          <Button
-            title="Submit Verification Code"
-            onPress={handleVerify}
-            loading={loading}
-            size="lg"
-            style={{ marginTop: Spacing.md }}
-          />
-
-          {/* Resend OTP Row */}
-          <View style={styles.resendRow}>
-            <Text style={[styles.resendText, { color: theme.textMuted }]}>
-              Didn't receive the code?{' '}
-            </Text>
-            <TouchableOpacity onPress={handleResendOtp} disabled={resendCooldown > 0}>
               <Text
                 style={[
-                  styles.resendLink,
-                  {
-                    color: resendCooldown > 0 ? theme.textMuted : theme.brandAccent,
-                  },
+                  styles.tabPillText,
+                  { color: activeTab === 'link' ? '#1C232D' : theme.textMuted },
                 ]}>
-                {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}
+                Link
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                setActiveTab('email_otp');
+                setErrorMsg(null);
+              }}
+              style={[
+                styles.tabPill,
+                {
+                  backgroundColor: activeTab === 'email_otp' ? theme.brandAccent : theme.bgCard,
+                  borderColor: activeTab === 'email_otp' ? theme.brandAccent : theme.borderColor,
+                },
+              ]}>
+              <Ionicons
+                name="mail-outline"
+                size={13}
+                color={activeTab === 'email_otp' ? '#1C232D' : theme.textMuted}
+                style={{ marginRight: 4 }}
+              />
+              <Text
+                style={[
+                  styles.tabPillText,
+                  { color: activeTab === 'email_otp' ? '#1C232D' : theme.textMuted },
+                ]}>
+                Email Code
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                setActiveTab('sms_otp');
+                setErrorMsg(null);
+              }}
+              style={[
+                styles.tabPill,
+                {
+                  backgroundColor: activeTab === 'sms_otp' ? theme.brandAccent : theme.bgCard,
+                  borderColor: activeTab === 'sms_otp' ? theme.brandAccent : theme.borderColor,
+                },
+              ]}>
+              <Ionicons
+                name="chatbubble-ellipses-outline"
+                size={13}
+                color={activeTab === 'sms_otp' ? '#1C232D' : theme.textMuted}
+                style={{ marginRight: 4 }}
+              />
+              <Text
+                style={[
+                  styles.tabPillText,
+                  { color: activeTab === 'sms_otp' ? '#1C232D' : theme.textMuted },
+                ]}>
+                SMS Code
               </Text>
             </TouchableOpacity>
           </View>
 
-          {/* Verify with Email Link Alternative */}
-          <View style={styles.dividerRow}>
-            <View style={[styles.dividerLine, { backgroundColor: theme.borderColor }]} />
-            <Text style={[styles.dividerText, { color: theme.textMuted }]}>OR</Text>
-            <View style={[styles.dividerLine, { backgroundColor: theme.borderColor }]} />
-          </View>
+          {/* =========================================================================
+              TAB 1: EMAIL VERIFICATION LINK
+              ========================================================================= */}
+          {activeTab === 'link' && (
+            <View>
+              <View
+                style={[
+                  styles.infoCard,
+                  { borderColor: theme.borderColor, backgroundColor: theme.surfaceSubtle },
+                ]}>
+                <View style={[styles.channelIconWrap, { backgroundColor: theme.bgCard }]}>
+                  <Ionicons name="mail-open-outline" size={20} color={theme.brandAccent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.infoLabel, { color: theme.textMuted }]}>
+                    REGISTERED EMAIL
+                  </Text>
+                  <Text style={[styles.infoValue, { color: theme.textMain }]} numberOfLines={1}>
+                    {targetEmail}
+                  </Text>
+                </View>
+              </View>
 
-          <Button
-            title="Verify with Email Link Instead"
-            variant="outline"
-            size="sm"
-            icon={<Ionicons name="link-outline" size={16} color={theme.brandAccent} />}
-            onPress={handleSendEmailLink}
-            loading={sendingLink}
-            style={{ marginBottom: Spacing.md }}
-          />
+              <Text style={[styles.methodDesc, { color: theme.textMuted }]}>
+                We will dispatch a secure, cryptographic one-click activation URL to your email inbox. Simply tap the link to unlock your patient portal.
+              </Text>
 
-          {/* Change Email Trigger */}
+              <Button
+                title={linkCooldown > 0 ? `Resend Link in ${linkCooldown}s` : 'Send Activation Email Link'}
+                onPress={handleSendEmailLink}
+                loading={sendingLink}
+                disabled={linkCooldown > 0}
+                size="lg"
+                style={{ marginTop: Spacing.sm }}
+              />
+            </View>
+          )}
+
+          {/* =========================================================================
+              TAB 2: EMAIL VERIFICATION CODE (6-DIGIT OTP)
+              ========================================================================= */}
+          {activeTab === 'email_otp' && (
+            <View>
+              <View style={styles.channelHeader}>
+                <Text style={[styles.channelLabel, { color: theme.textMuted }]}>
+                  Enter 6-Digit Email Code
+                </Text>
+                <Text style={[styles.channelTarget, { color: theme.brandAccent }]} numberOfLines={1}>
+                  {targetEmail}
+                </Text>
+              </View>
+
+              <View style={styles.otpRow}>
+                {emailOtpDigits.map((digit, idx) => (
+                  <TextInput
+                    key={`email-otp-${idx}`}
+                    ref={(el) => {
+                      emailInputRefs.current[idx] = el;
+                    }}
+                    value={digit}
+                    onChangeText={(val) => handleDigitChange(val, idx, 'email')}
+                    onKeyPress={(e) => handleKeyPress(e, idx, 'email')}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    style={[
+                      styles.otpBox,
+                      {
+                        backgroundColor: theme.bgCard,
+                        borderColor: digit
+                          ? theme.brandAccent
+                          : errorMsg
+                          ? theme.danger
+                          : theme.borderColor,
+                        color: theme.textMain,
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+
+              <Button
+                title="Submit Verification Code"
+                onPress={() => handleVerifyOtp('email')}
+                loading={loading}
+                size="lg"
+                style={{ marginTop: Spacing.xs }}
+              />
+
+              <View style={styles.resendRow}>
+                <Text style={[styles.resendText, { color: theme.textMuted }]}>
+                  Didn't receive the email code?{' '}
+                </Text>
+                <TouchableOpacity onPress={handleResendEmailOtp} disabled={emailCooldown > 0}>
+                  <Text
+                    style={[
+                      styles.resendLink,
+                      {
+                        color: emailCooldown > 0 ? theme.textMuted : theme.brandAccent,
+                      },
+                    ]}>
+                    {emailCooldown > 0 ? `Resend in ${emailCooldown}s` : 'Resend Code'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* =========================================================================
+              TAB 3: MOBILE PHONE SMS OTP (6-DIGIT OTP)
+              ========================================================================= */}
+          {activeTab === 'sms_otp' && (
+            <View>
+              <View style={styles.channelHeader}>
+                <Text style={[styles.channelLabel, { color: theme.textMuted }]}>
+                  Enter 6-Digit SMS Code
+                </Text>
+                <Text style={[styles.channelTarget, { color: theme.brandAccent }]} numberOfLines={1}>
+                  {userPhone || 'No phone registered'}
+                </Text>
+              </View>
+
+              <View style={styles.otpRow}>
+                {smsOtpDigits.map((digit, idx) => (
+                  <TextInput
+                    key={`sms-otp-${idx}`}
+                    ref={(el) => {
+                      smsInputRefs.current[idx] = el;
+                    }}
+                    value={digit}
+                    onChangeText={(val) => handleDigitChange(val, idx, 'sms')}
+                    onKeyPress={(e) => handleKeyPress(e, idx, 'sms')}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    style={[
+                      styles.otpBox,
+                      {
+                        backgroundColor: theme.bgCard,
+                        borderColor: digit
+                          ? theme.brandAccent
+                          : errorMsg
+                          ? theme.danger
+                          : theme.borderColor,
+                        color: theme.textMain,
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+
+              <Button
+                title="Verify SMS Code"
+                onPress={() => handleVerifyOtp('sms')}
+                loading={loading}
+                size="lg"
+                style={{ marginTop: Spacing.xs }}
+              />
+
+              <View style={styles.resendRow}>
+                <Text style={[styles.resendText, { color: theme.textMuted }]}>
+                  Didn't receive the SMS code?{' '}
+                </Text>
+                <TouchableOpacity onPress={handleResendSmsOtp} disabled={smsCooldown > 0}>
+                  <Text
+                    style={[
+                      styles.resendLink,
+                      {
+                        color: smsCooldown > 0 ? theme.textMuted : theme.brandAccent,
+                      },
+                    ]}>
+                    {smsCooldown > 0 ? `Resend in ${smsCooldown}s` : 'Resend SMS Code'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Change Email Trigger & Form */}
           <TouchableOpacity
             onPress={() => setShowChangeEmail((prev) => !prev)}
             style={styles.changeEmailTrigger}>
             <Ionicons
               name="create-outline"
-              size={16}
+              size={15}
               color={theme.brandAccent}
               style={{ marginRight: 4 }}
             />
@@ -368,8 +668,75 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: Typography.sizes.xs,
     marginTop: 4,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
     lineHeight: 18,
+  },
+  tabPillsRow: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  tabPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+  },
+  tabPillText: {
+    fontSize: Typography.sizes.xs - 2,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  channelIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  infoValue: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  methodDesc: {
+    fontSize: Typography.sizes.xs,
+    lineHeight: 17,
+    marginBottom: Spacing.md,
+  },
+  channelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  channelLabel: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  channelTarget: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '700',
+    maxWidth: '50%',
   },
   otpRow: {
     flexDirection: 'row',
@@ -398,25 +765,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: Spacing.md,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-  },
-  dividerText: {
-    fontSize: 10,
-    fontWeight: '800',
-    marginHorizontal: Spacing.sm,
-  },
   changeEmailTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: Spacing.sm,
+    marginTop: Spacing.md,
   },
   changeEmailText: { fontSize: Typography.sizes.xs, fontWeight: '700' },
   changeEmailBox: {
@@ -428,7 +781,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: Spacing.xl,
+    marginTop: Spacing.lg,
   },
   logoutText: {
     fontSize: Typography.sizes.xs,

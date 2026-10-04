@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   Platform,
   TextInput,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,14 +18,16 @@ import { useTheme } from '../../hooks/useTheme';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { NoticeBox } from '../../components/common/NoticeBox';
+import { ActionModal } from '../../components/common/ActionModal';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
+import { User } from '../../types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ReactivateAccount'>;
 
 export const ReactivateAccountScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { verifyReactivationOtp, sendReactivationOtp } = useAuth();
+  const { verifyReactivationOtp, sendReactivationOtp, completeReactivation } = useAuth();
   const scrollViewRef = useRef<ScrollView | null>(null);
 
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
@@ -34,6 +35,10 @@ export const ReactivateAccountScreen: React.FC<Props> = ({ navigation }) => {
   const [resending, setResending] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Success Modal & Session State
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [pendingSession, setPendingSession] = useState<{ token: string; user: User } | null>(null);
 
   const inputRefs = useRef<Array<TextInput | null>>([]);
 
@@ -63,7 +68,6 @@ export const ReactivateAccountScreen: React.FC<Props> = ({ navigation }) => {
     updated[index] = clean.slice(-1);
     setOtpDigits(updated);
     if (errorMsg) setErrorMsg(null);
-
     if (clean && index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
@@ -84,16 +88,24 @@ export const ReactivateAccountScreen: React.FC<Props> = ({ navigation }) => {
 
     setErrorMsg(null);
     setLoading(true);
+
     const res = await verifyReactivationOtp(fullOtp);
     setLoading(false);
 
     if (res.success) {
-      Alert.alert(
-        'Account Reactivated',
-        'Welcome back! Your clinical history and portal access have been fully restored.'
-      );
+      if (res.token && res.user) {
+        setPendingSession({ token: res.token, user: res.user });
+      }
+      setSuccessModalVisible(true);
     } else {
       showError(res.message || 'Incorrect or expired reactivation code.');
+    }
+  };
+
+  const handleSuccessDismiss = async () => {
+    setSuccessModalVisible(false);
+    if (pendingSession && completeReactivation) {
+      await completeReactivation(pendingSession.token, pendingSession.user);
     }
   };
 
@@ -128,6 +140,7 @@ export const ReactivateAccountScreen: React.FC<Props> = ({ navigation }) => {
           <View style={[styles.iconCircle, { backgroundColor: 'rgba(255, 193, 7, 0.1)' }]}>
             <Ionicons name="shield-half-outline" size={32} color={theme.warning} />
           </View>
+
           <Text style={[styles.title, { color: theme.textMain }]}>Account Reactivation</Text>
           <Text style={[styles.subtitle, { color: theme.textMuted }]}>
             Your profile is currently deactivated. Enter the 6-digit authorization OTP sent to
@@ -145,7 +158,7 @@ export const ReactivateAccountScreen: React.FC<Props> = ({ navigation }) => {
             />
           ) : null}
 
-          {/* Dynamic In-Page Error Notice (Teleport Target at Top) */}
+          {/* Dynamic In-Page Error Notice */}
           {errorMsg ? (
             <NoticeBox
               type="danger"
@@ -217,6 +230,26 @@ export const ReactivateAccountScreen: React.FC<Props> = ({ navigation }) => {
           </TouchableOpacity>
         </Card>
       </ScrollView>
+
+      {/* UNIFIED MODAL: Account Reactivated Success Prompt */}
+      <ActionModal
+        visible={successModalVisible}
+        type="success"
+        icon="checkmark-circle-outline"
+        title="Account Reactivated"
+        confirmText="Enter Portal"
+        isSingleAction={true}
+        confirmVariant="primary"
+        onClose={handleSuccessDismiss}
+        onConfirm={handleSuccessDismiss}
+        message={
+          <View style={styles.successModalContent}>
+            <Text style={[styles.successModalPrompt, { color: theme.textMain }]}>
+              Welcome back! Your clinical history and portal access have been fully restored.
+            </Text>
+          </View>
+        }
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -268,5 +301,39 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     fontWeight: '800',
     textTransform: 'uppercase',
+  },
+
+  // Success Modal Styles
+  successModalContent: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  successModalPrompt: {
+    fontSize: Typography.sizes.xs + 1,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  successAlertBox: {
+    padding: Spacing.sm + 2,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    marginTop: 4,
+  },
+  successAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  successAlertBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  successAlertBody: {
+    fontSize: Typography.sizes.xs - 1,
+    lineHeight: 16,
   },
 });

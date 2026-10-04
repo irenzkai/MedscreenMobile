@@ -130,8 +130,8 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
   const isExpired = isAppointmentExpired(appointment);
   const effectiveStatus = getEffectiveAppointmentStatus(appointment);
   const displayAge = calculatePatientAge(appointment);
-  const isBulk = !!appointment.batch_id;
-  const isDependent = !!appointment.dependent_id;
+  const isBulk = !appointment.batch_id;
+  const isDependent = !appointment.dependent_id;
   const categoryLabel = isBulk ? 'BULK' : isDependent ? 'DEPENDENT' : 'PERSONAL';
 
   const canResubmit =
@@ -153,17 +153,39 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
     const included = appointment.result?.included_reports || [];
     const serviceNames = (appointment.services || []).map((s) => s.name.toUpperCase());
 
-    if (
-      included.includes('lab') ||
-      included.length === 0 ||
-      serviceNames.some(
-        (n) => !n.includes('X-RAY') && !n.includes('DRUG') && !n.includes('CERTIFICATE')
-      )
-    ) {
+    const hasExplicitIncluded = Array.isArray(included) && included.length > 0;
+
+    // Service matching helpers matching Laravel ResultController
+    const isRadioService = (n: string) => n.includes('X-RAY') || n.includes('XRAY');
+    const isDrugService = (n: string) => n.includes('DRUG TEST') || n.includes('DRUG');
+    const isMedCertService = (n: string) =>
+      n.includes('MEDICAL CERTIFICATE') || n.includes('MED_CERT') || n.includes('CERTIFICATE');
+    const isLabService = (n: string) =>
+      !isRadioService(n) && !isDrugService(n) && !isMedCertService(n);
+
+    // If included_reports is present, honor it strictly. Otherwise, fallback safely to service matching.
+    const showLab = hasExplicitIncluded
+      ? included.includes('lab')
+      : Boolean((appointment.result as any)?.lab_scan) || serviceNames.some(isLabService);
+
+    const showRadio = hasExplicitIncluded
+      ? included.includes('radio')
+      : Boolean((appointment.result as any)?.radio_scan || (appointment.result as any)?.xray_image) ||
+        serviceNames.some(isRadioService);
+
+    const showDrug = hasExplicitIncluded
+      ? included.includes('drug')
+      : Boolean((appointment.result as any)?.drug_test_scan) || serviceNames.some(isDrugService);
+
+    const showMedCert = hasExplicitIncluded
+      ? included.includes('med_cert')
+      : Boolean((appointment.result as any)?.med_cert_scan) || serviceNames.some(isMedCertService);
+
+    if (showLab) {
       const isScanImage = isImageDocument((appointment.result as any)?.lab_scan);
       availableReports.push({
         key: 'lab',
-        label: 'Laboratory Examination Report',
+        label: 'Laboratory Report',
         icon: 'flask-outline',
         previewUrl: isScanImage
           ? resolveFileUrl((appointment.result as any)?.lab_scan)
@@ -174,16 +196,13 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
       });
     }
 
-    if (
-      included.includes('radio') ||
-      serviceNames.some((n) => n.includes('X-RAY') || n.includes('XRAY'))
-    ) {
+    if (showRadio) {
       const scanUri =
         (appointment.result as any)?.radio_scan || (appointment.result as any)?.xray_image;
       const isScanImage = isImageDocument(scanUri);
       availableReports.push({
         key: 'radio',
-        label: 'Radiology / Chest X-Ray',
+        label: 'Radiology Report / X-Ray',
         icon: 'scan-outline',
         previewUrl: isScanImage
           ? resolveFileUrl(scanUri)
@@ -194,11 +213,11 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
       });
     }
 
-    if (included.includes('drug') || serviceNames.some((n) => n.includes('DRUG TEST'))) {
+    if (showDrug) {
       const isScanImage = isImageDocument((appointment.result as any)?.drug_test_scan);
       availableReports.push({
         key: 'drug',
-        label: 'Drug Test Certificate (CCDT)',
+        label: 'Drug Test Certificate',
         icon: 'shield-checkmark-outline',
         previewUrl: isScanImage
           ? resolveFileUrl((appointment.result as any)?.drug_test_scan)
@@ -209,14 +228,11 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
       });
     }
 
-    if (
-      included.includes('med_cert') ||
-      serviceNames.some((n) => n.includes('MEDICAL CERTIFICATE'))
-    ) {
+    if (showMedCert) {
       const isScanImage = isImageDocument((appointment.result as any)?.med_cert_scan);
       availableReports.push({
         key: 'med_cert',
-        label: 'Medical Fitness Certificate',
+        label: 'Medical Certificate',
         icon: 'ribbon-outline',
         previewUrl: isScanImage
           ? resolveFileUrl((appointment.result as any)?.med_cert_scan)
@@ -404,23 +420,25 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                 </View>
               )}
 
-              {appointment.payment_status !== 'paid' && appointment.payment_status !== 'invalid' && appointment.payment_status !== 'refunded' && (
-                <View
-                  style={[
-                    styles.refundNoticeBox,
-                    { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
-                  ]}>
-                  <View style={styles.refundNoticeHeader}>
-                    <Ionicons name="hourglass-outline" size={15} color={theme.warning} />
-                    <Text style={[styles.refundNoticeTitle, { color: theme.warning }]}>
-                      Please wait for payment confirmation & refund
+              {appointment.payment_status !== 'paid' &&
+                appointment.payment_status !== 'invalid' &&
+                appointment.payment_status !== 'refunded' && (
+                  <View
+                    style={[
+                      styles.refundNoticeBox,
+                      { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
+                    ]}>
+                    <View style={styles.refundNoticeHeader}>
+                      <Ionicons name="hourglass-outline" size={15} color={theme.warning} />
+                      <Text style={[styles.refundNoticeTitle, { color: theme.warning }]}>
+                        Please wait for payment confirmation & refund
+                      </Text>
+                    </View>
+                    <Text style={[styles.refundNoticeText, { color: theme.textMain }]}>
+                      Your appointment has been canceled. Since your cashless transaction verification is still pending, please wait for our team to confirm your payment first, after which your refund will be processed.
                     </Text>
                   </View>
-                  <Text style={[styles.refundNoticeText, { color: theme.textMain }]}>
-                    Your appointment has been canceled. Since your cashless transaction verification is still pending, please wait for our team to confirm your payment first, after which your refund will be processed.
-                  </Text>
-                </View>
-              )}
+                )}
             </>
           )}
         </Card>
@@ -430,35 +448,30 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
           <Text style={[styles.sectionTitle, { color: theme.brandAccent }]}>
             <Ionicons name="calendar-outline" size={14} /> Schedule & Location
           </Text>
-
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Visit Date:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
               {formatDate(appointment.appointment_date)}
             </Text>
           </View>
-
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Time Slot:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
               {formatTimeSlot(appointment.time_slot)}
             </Text>
           </View>
-
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Contact Phone:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
               {appointment.patient_phone || 'N/A'}
             </Text>
           </View>
-
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Patient Email:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
               {resolvedPatientEmail}
             </Text>
           </View>
-
           <View style={styles.keyValueRow}>
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Residential Address:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
@@ -590,15 +603,24 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
         </Card>
 
         {/* Released Results Section */}
-        {effectiveStatus === 'released' && (
-          <Card style={[styles.sectionCard, { borderColor: theme.brandAccent, borderWidth: 1.5 }]}>
+        {effectiveStatus === 'released' && availableReports.length > 0 && (
+          <Card
+            style={[
+              styles.sectionCard,
+              { borderColor: theme.brandAccent, borderWidth: 1.5 },
+            ]}>
             <View style={styles.resultsHeaderRow}>
               <View>
-                <Text style={[styles.sectionTitle, { color: theme.brandAccent, marginBottom: 2 }]}>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    { color: theme.brandAccent, marginBottom: 2 },
+                  ]}>
                   <Ionicons name="shield-checkmark" size={16} /> Clinical Results Released
                 </Text>
                 <Text style={[styles.releasedSub, { color: theme.textMuted }]}>
-                  {availableReports.length} clinical document{availableReports.length > 1 ? 's' : ''} available
+                  {availableReports.length} clinical document
+                  {availableReports.length > 1 ? 's' : ''} available
                 </Text>
               </View>
               <Button
@@ -609,7 +631,6 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                 onPress={() => setForwardConfirmVisible(true)}
               />
             </View>
-
             <View style={styles.reportsList}>
               {availableReports.map((report) => (
                 <View
@@ -628,7 +649,10 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                   </View>
                   <View style={styles.reportButtonsRow}>
                     <TouchableOpacity
-                      style={[styles.reportPreviewBtn, { backgroundColor: theme.brandAccent }]}
+                      style={[
+                        styles.reportPreviewBtn,
+                        { backgroundColor: theme.brandAccent },
+                      ]}
                       onPress={() =>
                         openPreview(
                           report.previewUrl,
@@ -643,7 +667,10 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                     <TouchableOpacity
                       style={[
                         styles.reportDownloadBtn,
-                        { borderColor: theme.brandAccent, backgroundColor: theme.bgCard },
+                        {
+                          borderColor: theme.brandAccent,
+                          backgroundColor: theme.bgCard,
+                        },
                       ]}
                       disabled={downloadingKey === report.key}
                       onPress={() => handleDownloadSpecificResult(report)}>
@@ -651,8 +678,16 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                         <ActivityIndicator size="small" color={theme.brandAccent} />
                       ) : (
                         <>
-                          <Ionicons name="download-outline" size={14} color={theme.brandAccent} />
-                          <Text style={[styles.reportDownloadBtnText, { color: theme.brandAccent }]}>
+                          <Ionicons
+                            name="download-outline"
+                            size={14}
+                            color={theme.brandAccent}
+                          />
+                          <Text
+                            style={[
+                              styles.reportDownloadBtnText,
+                              { color: theme.brandAccent },
+                            ]}>
                             SAVE
                           </Text>
                         </>
@@ -728,7 +763,11 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
             {appointment.payment_method === 'Cashless' ? (
               isPaid ? (
                 isWithin24Hours ? (
-                  <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning }]}>
+                  <View
+                    style={[
+                      styles.cancelAlertBox,
+                      { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
+                    ]}>
                     <View style={styles.cancelAlertHeader}>
                       <Ionicons name="checkmark-circle" size={14} color={theme.success} />
                       <Text style={[styles.cancelAlertBadgeText, { color: theme.success }]}>
@@ -736,13 +775,19 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                       </Text>
                     </View>
                     <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                      <Text style={[styles.policyHighlight, { color: theme.warning }]}>50% Fee Applies: </Text>
+                      <Text style={[styles.policyHighlight, { color: theme.warning }]}>
+                        50% Fee Applies:{' '}
+                      </Text>
                       Because cancellation is requested within 24 hours of your slot ({scheduledFormatted}), a{' '}
                       <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies. 50% will be refunded to your account.
                     </Text>
                   </View>
                 ) : (
-                  <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(25, 211, 140, 0.08)', borderColor: theme.brandAccent }]}>
+                  <View
+                    style={[
+                      styles.cancelAlertBox,
+                      { backgroundColor: 'rgba(25, 211, 140, 0.08)', borderColor: theme.brandAccent },
+                    ]}>
                     <View style={styles.cancelAlertHeader}>
                       <Ionicons name="checkmark-circle" size={14} color={theme.success} />
                       <Text style={[styles.cancelAlertBadgeText, { color: theme.success }]}>
@@ -750,56 +795,69 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                       </Text>
                     </View>
                     <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                      <Text style={[styles.policyHighlight, { color: theme.brandAccent }]}>100% Full Refund Eligible: </Text>
+                      <Text style={[styles.policyHighlight, { color: theme.brandAccent }]}>
+                        100% Full Refund Eligible:{' '}
+                      </Text>
                       You are canceling more than 24 hours in advance. Your paid cashless transaction is eligible for a{' '}
                       <Text style={{ fontWeight: '800' }}>100% full refund</Text>.
                     </Text>
                   </View>
                 )
-              ) : (
-                isWithin24Hours ? (
-                  <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning }]}>
-                    <View style={styles.cancelAlertHeader}>
-                      <Ionicons name="time" size={14} color={theme.warning} />
-                      <Text style={[styles.cancelAlertBadgeText, { color: theme.warning }]}>
-                        Payment Status: Pending Verification
-                      </Text>
-                    </View>
-                    <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                      Your uploaded payment receipt has not been confirmed yet. Since you are canceling within 24 hours of your slot ({scheduledFormatted}), a{' '}
-                      <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies upon confirmation.
+              ) : isWithin24Hours ? (
+                <View
+                  style={[
+                    styles.cancelAlertBox,
+                    { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
+                  ]}>
+                  <View style={styles.cancelAlertHeader}>
+                    <Ionicons name="time" size={14} color={theme.warning} />
+                    <Text style={[styles.cancelAlertBadgeText, { color: theme.warning }]}>
+                      Payment Status: Pending Verification
                     </Text>
                   </View>
-                ) : (
-                  <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(13, 202, 240, 0.08)', borderColor: theme.info }]}>
-                    <View style={styles.cancelAlertHeader}>
-                      <Ionicons name="time" size={14} color={theme.info} />
-                      <Text style={[styles.cancelAlertBadgeText, { color: theme.info }]}>
-                        Payment Status: Pending Verification
-                      </Text>
-                    </View>
-                    <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                      Your uploaded payment receipt has not been confirmed yet. Since you are canceling more than 24 hours in advance, the booking will be canceled with no charge.
-                    </Text>
-                  </View>
-                )
-              )
-            ) : (
-              /* Cash on Site Booking Disclosures */
-              isWithin24Hours ? (
-                <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning }]}>
                   <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                    <Text style={[styles.policyHighlight, { color: theme.warning }]}>Notice: </Text>
-                    Canceling within 24 hours of your scheduled appointment time ({scheduledFormatted}).
+                    Your uploaded payment receipt has not been confirmed yet. Since you are canceling within 24 hours of your slot ({scheduledFormatted}), a{' '}
+                    <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies upon confirmation.
                   </Text>
                 </View>
               ) : (
-                <View style={[styles.cancelAlertBox, { backgroundColor: 'rgba(108, 117, 125, 0.08)', borderColor: theme.borderColor }]}>
-                  <Text style={[styles.cancelAlertBody, { color: theme.textMuted }]}>
-                    Free cancellation available for this cash booking (more than 24 hours in advance).
+                <View
+                  style={[
+                    styles.cancelAlertBox,
+                    { backgroundColor: 'rgba(13, 202, 240, 0.08)', borderColor: theme.info },
+                  ]}>
+                  <View style={styles.cancelAlertHeader}>
+                    <Ionicons name="time" size={14} color={theme.info} />
+                    <Text style={[styles.cancelAlertBadgeText, { color: theme.info }]}>
+                      Payment Status: Pending Verification
+                    </Text>
+                  </View>
+                  <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                    Your uploaded payment receipt has not been confirmed yet. Since you are canceling more than 24 hours in advance, the booking will be canceled with no charge.
                   </Text>
                 </View>
               )
+            ) : isWithin24Hours ? (
+              <View
+                style={[
+                  styles.cancelAlertBox,
+                  { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
+                ]}>
+                <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                  <Text style={[styles.policyHighlight, { color: theme.warning }]}>Notice: </Text>
+                  Canceling within 24 hours of your scheduled appointment time ({scheduledFormatted}).
+                </Text>
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.cancelAlertBox,
+                  { backgroundColor: 'rgba(108, 117, 125, 0.08)', borderColor: theme.borderColor },
+                ]}>
+                <Text style={[styles.cancelAlertBody, { color: theme.textMuted }]}>
+                  Free cancellation available for this cash booking (more than 24 hours in advance).
+                </Text>
+              </View>
             )}
           </View>
         }
@@ -974,7 +1032,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   bottomActions: { marginTop: Spacing.md },
-
   // Canceled & Refund Status Screen Notice Styles
   refundNoticeBox: {
     marginTop: Spacing.md,
@@ -1021,7 +1078,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 14,
   },
-
   // Cancel Confirmation Modal Styles
   cancelModalContent: {
     width: '100%',

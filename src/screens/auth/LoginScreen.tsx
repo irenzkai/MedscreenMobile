@@ -7,10 +7,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
-  Alert,
   Image,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthStackParamList } from '../../navigation/AuthNavigator';
 import { useAuth } from '../../context/AuthContext';
@@ -19,8 +19,9 @@ import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { NoticeBox } from '../../components/common/NoticeBox';
+import { ActionModal } from '../../components/common/ActionModal';
 import { validateEmail, validateRequired } from '../../utils/validators';
-import { Spacing, Typography } from '../../constants/theme';
+import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
@@ -35,6 +36,10 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+
+  // Deactivated Account Modal States
+  const [deactivatedModalVisible, setDeactivatedModalVisible] = useState(false);
+  const [deactivatedMessage, setDeactivatedMessage] = useState<string>('');
 
   const showError = (msg: string) => {
     setErrorMessage(msg);
@@ -62,19 +67,14 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
     try {
       const res = await login(email, password);
+
       if (!res.success) {
         if (res.deactivated) {
-          Alert.alert(
-            'Account Deactivated',
-            res.message || 'Your account is deactivated. Would you like to reactivate it now?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Reactivate',
-                onPress: () => navigation.navigate('ReactivateAccount'),
-              },
-            ]
+          setDeactivatedMessage(
+            res.message ||
+              'Your account is currently deactivated. A verification code has been dispatched to your email.'
           );
+          setDeactivatedModalVisible(true);
         } else {
           showError(res.message || 'Invalid email or password.');
         }
@@ -194,6 +194,30 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </Card>
       </ScrollView>
+
+      {/* UNIFIED MODAL: Deactivated Account Prompt */}
+      <ActionModal
+        visible={deactivatedModalVisible}
+        type="warning"
+        icon="shield-half-outline"
+        title="Account Deactivated"
+        confirmText="Reactivate"
+        cancelText="Cancel"
+        confirmVariant="primary"
+        onClose={() => setDeactivatedModalVisible(false)}
+        onConfirm={() => {
+          setDeactivatedModalVisible(false);
+          navigation.navigate('ReactivateAccount');
+        }}
+        message={
+          <View style={styles.deactivatedModalContent}>
+            <Text style={[styles.deactivatedPrompt, { color: theme.textMain }]}>
+              {deactivatedMessage ||
+                'Your account is currently deactivated. Would you like to reactivate it now?'}
+            </Text>
+          </View>
+        }
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -262,5 +286,39 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     fontWeight: '800',
     textTransform: 'uppercase',
+  },
+
+  // Deactivated Modal Styles
+  deactivatedModalContent: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  deactivatedPrompt: {
+    fontSize: Typography.sizes.xs + 1,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  deactivatedAlertBox: {
+    padding: Spacing.sm + 2,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    marginTop: 4,
+  },
+  deactivatedAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  deactivatedAlertBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  deactivatedAlertBody: {
+    fontSize: Typography.sizes.xs - 1,
+    lineHeight: 16,
   },
 });

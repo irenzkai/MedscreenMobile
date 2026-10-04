@@ -46,12 +46,18 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
 }) => {
   const theme = useTheme();
 
+  // API datasets
   const [provinces, setProvinces] = useState<PSGCItem[]>([]);
   const [cities, setCities] = useState<PSGCItem[]>([]);
   const [barangays, setBarangays] = useState<PSGCItem[]>([]);
 
+  // Selected values (Names & Codes for direct hierarchical traversal)
   const [selectedProvince, setSelectedProvince] = useState<string>(province);
+  const [selectedProvinceCode, setSelectedProvinceCode] = useState<string>('');
+
   const [selectedCity, setSelectedCity] = useState<string>(city);
+  const [selectedCityCode, setSelectedCityCode] = useState<string>('');
+
   const [selectedBarangay, setSelectedBarangay] = useState<string>(barangay);
   const [streetVal, setStreetVal] = useState<string>(street);
 
@@ -61,10 +67,68 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [loadingItems, setLoadingItems] = useState(false);
 
-  useEffect(() => {
-    psgcApi.getProvinces().then(setProvinces);
-  }, []);
+  // Match text names with API items case-insensitively
+  const findMatch = (list: PSGCItem[], text?: string): PSGCItem | undefined => {
+    if (!text) return undefined;
+    const clean = text.trim().toUpperCase();
+    return list.find((item) => item.name.trim().toUpperCase() === clean || item.code === text.trim());
+  };
 
+  // Pre-load and match hierarchy on mount and whenever external props change
+  useEffect(() => {
+    let isMounted = true;
+
+    const initHierarchy = async () => {
+      // 1. Fetch provinces
+      const pList = await psgcApi.getProvinces();
+      if (!isMounted) return;
+      setProvinces(pList);
+
+      // 2. If province is present, resolve its code and pre-fetch its cities
+      if (province) {
+        const provMatch = findMatch(pList, province);
+        if (provMatch) {
+          if (!isMounted) return;
+          setSelectedProvinceCode(provMatch.code);
+          setSelectedProvince(provMatch.name);
+
+          const cList = await psgcApi.getCities(provMatch.code);
+          if (!isMounted) return;
+          setCities(cList);
+
+          // 3. If city is present, resolve its code and pre-fetch its barangays
+          if (city) {
+            const cityMatch = findMatch(cList, city);
+            if (cityMatch) {
+              if (!isMounted) return;
+              setSelectedCityCode(cityMatch.code);
+              setSelectedCity(cityMatch.name);
+
+              const bList = await psgcApi.getBarangays(cityMatch.code);
+              if (!isMounted) return;
+              setBarangays(bList);
+
+              // 4. If barangay is present, normalize display name
+              if (barangay) {
+                const brgyMatch = findMatch(bList, barangay);
+                if (brgyMatch && isMounted) {
+                  setSelectedBarangay(brgyMatch.name);
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+
+    initHierarchy();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [province, city, barangay]);
+
+  // Synchronize inputs
   useEffect(() => {
     setSelectedProvince(province);
     setSelectedCity(city);
@@ -75,52 +139,93 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
   const openPicker = async (type: 'province' | 'city' | 'barangay') => {
     setSearchQuery('');
     setModalType(type);
+    setModalVisible(true);
 
-    if (type === 'city') {
-      if (!selectedProvince) return;
-      const provObj = provinces.find((p) => p.name === selectedProvince);
-      if (provObj) {
+    if (type === 'province') {
+      if (provinces.length === 0) {
         setLoadingItems(true);
-        const cList = await psgcApi.getCities(provObj.code);
+        const pList = await psgcApi.getProvinces();
+        setProvinces(pList);
+        setLoadingItems(false);
+      }
+    } else if (type === 'city') {
+      // Ensure cities for the current province are ready
+      let provCode = selectedProvinceCode;
+      if (!provCode && selectedProvince) {
+        const provMatch = findMatch(provinces, selectedProvince);
+        if (provMatch) {
+          provCode = provMatch.code;
+          setSelectedProvinceCode(provCode);
+        }
+      }
+
+      if (provCode && cities.length === 0) {
+        setLoadingItems(true);
+        const cList = await psgcApi.getCities(provCode);
         setCities(cList);
         setLoadingItems(false);
       }
     } else if (type === 'barangay') {
-      if (!selectedCity) return;
-      const cityObj = cities.find((c) => c.name === selectedCity);
-      if (cityObj) {
+      // Ensure barangays for the current city are ready
+      let cCode = selectedCityCode;
+      if (!cCode && selectedCity) {
+        const cityMatch = findMatch(cities, selectedCity);
+        if (cityMatch) {
+          cCode = cityMatch.code;
+          setSelectedCityCode(cCode);
+        }
+      }
+
+      if (cCode && barangays.length === 0) {
         setLoadingItems(true);
-        const bList = await psgcApi.getBarangays(cityObj.code);
+        const bList = await psgcApi.getBarangays(cCode);
         setBarangays(bList);
         setLoadingItems(false);
       }
     }
-
-    setModalVisible(true);
   };
 
   const handleSelectItem = (item: PSGCItem) => {
     if (modalType === 'province') {
       setSelectedProvince(item.name);
+      setSelectedProvinceCode(item.code);
+
+      // Reset downstream fields
       setSelectedCity('');
+      setSelectedCityCode('');
       setSelectedBarangay('');
+      setCities([]);
+      setBarangays([]);
+
       onAddressChange({
         province: item.name,
         city: '',
         barangay: '',
         street: streetVal,
       });
+
+      // Immediately pre-fetch cities for the selected province
+      psgcApi.getCities(item.code).then(setCities);
     } else if (modalType === 'city') {
       setSelectedCity(item.name);
+      setSelectedCityCode(item.code);
+
+      // Reset downstream barangay only
       setSelectedBarangay('');
+      setBarangays([]);
+
       onAddressChange({
         province: selectedProvince,
         city: item.name,
         barangay: '',
         street: streetVal,
       });
+
+      // Immediately pre-fetch barangays for the selected city
+      psgcApi.getBarangays(item.code).then(setBarangays);
     } else if (modalType === 'barangay') {
       setSelectedBarangay(item.name);
+
       onAddressChange({
         province: selectedProvince,
         city: selectedCity,
@@ -128,6 +233,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
         street: streetVal,
       });
     }
+
     setModalVisible(false);
   };
 

@@ -8,7 +8,6 @@ import {
   Platform,
   TouchableOpacity,
   Switch,
-  Alert,
   BackHandler,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -39,7 +38,10 @@ import {
   validateRequired,
   calculateAge,
 } from '../../utils/validators';
-import { formatToStandardPhone, formatDisplayPhone } from '../../utils/formatters';
+import {
+  formatToStandardPhone,
+  formatDisplayPhone,
+} from '../../utils/formatters';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
@@ -168,25 +170,21 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
     } else if (step === 3) {
       const emailErr = validateEmail(email);
       if (emailErr) errs.email = emailErr;
-
       const fullPhone = formatToStandardPhone(phoneDisplay);
       const phoneErr = validatePhone(fullPhone);
       if (phoneErr) errs.phone = phoneErr;
     } else if (step === 4) {
       const passErr = validatePassword(password);
       if (passErr) errs.password = passErr;
-
       const confErr = validatePasswordConfirmation(password, confirmPassword);
       if (confErr) errs.confirmPassword = confErr;
     }
 
     setFieldErrors(errs);
-
     if (Object.keys(errs).length > 0) {
       showError('Please review the highlighted omissions below before continuing.');
       return false;
     }
-
     return true;
   };
 
@@ -236,16 +234,8 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
 
     if (res.success) {
       clearPendingPromotion();
-      Alert.alert(
-        'Account Registered',
-        'Your profile has been registered. Please verify your email with the 6-digit code sent to you.',
-        [
-          {
-            text: 'Proceed to Verification',
-            onPress: () => navigation.navigate('VerifyAccount', { email: payload.email }),
-          },
-        ]
-      );
+      // Automatically redirect directly to account verification screen
+      navigation.navigate('VerifyAccount', { email: payload.email });
     } else {
       showError(res.message || 'Could not complete registration. Please try again.');
     }
@@ -270,7 +260,6 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
           },
         ]}
         keyboardShouldPersistTaps="handled">
-        
         {/* Top Back / Login Navigation Button */}
         <TouchableOpacity onPress={handleTopBackPress} style={styles.topBackBtn}>
           <Ionicons name="arrow-back" size={20} color={theme.brandAccent} />
@@ -347,6 +336,7 @@ export const RegisterScreen: React.FC<Props> = ({ navigation, route }) => {
                   />
                 </View>
               </View>
+
               {!noMiddleName && (
                 <Input
                   value={middleName}

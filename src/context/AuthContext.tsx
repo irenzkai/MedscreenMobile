@@ -66,10 +66,15 @@ interface AuthContextType {
   logout: () => Promise<void>;
   logoutAndRegister: (dependent: Dependent, parentUser?: User | null) => Promise<void>;
   sendOtp: (email?: string) => Promise<AuthResponse>;
-  verifyOtp: (otp: string, email?: string) => Promise<AuthResponse>;
+  sendSmsOtp: (phone?: string) => Promise<AuthResponse>;
+  verifyOtp: (otp: string, email?: string, channel?: 'email' | 'sms') => Promise<AuthResponse>;
   changeUnverifiedEmail: (newEmail: string) => Promise<AuthResponse>;
   sendReactivationOtp: () => Promise<AuthResponse>;
-  verifyReactivationOtp: (otp: string) => Promise<AuthResponse>;
+  verifyReactivationOtp: (
+    otp: string,
+    autoCommit?: boolean
+  ) => Promise<AuthResponse & { token?: string; user?: User }>;
+  completeReactivation: (sessionToken: string, sessionUser: User) => Promise<void>;
   refreshUserProfile: () => Promise<void>;
   setUser: React.Dispatch<React.SetStateAction<User | null>>;
 }
@@ -97,6 +102,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsLoading(false);
       }
     };
+
     initializeAuth();
 
     registerUnauthorizedListener(() => {
@@ -124,6 +130,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         email: email.trim(),
         password,
       });
+
       const { token: receivedToken, user: receivedUser, unverified } = response.data;
 
       if (receivedToken && receivedUser) {
@@ -131,7 +138,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await persistUser(receivedUser);
         setToken(receivedToken);
 
-        const isUnverified = unverified || !receivedUser.email_verified_at;
+        const isUnverified =
+          typeof unverified === 'boolean'
+            ? unverified
+            : !Boolean(receivedUser.email_verified_at || receivedUser.phone_verified_at);
+
         return {
           success: true,
           unverified: isUnverified,
@@ -155,6 +166,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             'Your account is currently deactivated. You must reactivate it to log in.',
         };
       }
+
       return {
         success: false,
         message: extractErrorMessage(error),
@@ -166,6 +178,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const response = await apiClient.post('/register', payload);
       const { token: receivedToken, user: receivedUser } = response.data;
+
       if (receivedToken && receivedUser) {
         await setStoredToken(receivedToken);
         await persistUser(receivedUser);
@@ -173,6 +186,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         clearPendingPromotion();
         return { success: true, unverified: true };
       }
+
       clearPendingPromotion();
       return {
         success: true,
@@ -204,26 +218,53 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const verifyOtp = async (otp: string, email?: string): Promise<AuthResponse> => {
+  const sendSmsOtp = async (phone?: string): Promise<AuthResponse> => {
+    try {
+      const response = await apiClient.post('/sms/verification-otp', {
+        phone: phone || user?.phone,
+        channel: 'sms',
+      });
+      return {
+        success: true,
+        message: response.data?.message || 'Verification code sent to your mobile phone.',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: extractErrorMessage(error),
+      };
+    }
+  };
+
+  const verifyOtp = async (
+    otp: string,
+    email?: string,
+    channel: 'email' | 'sms' = 'email'
+  ): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/verify-otp', {
         otp: otp.trim(),
         email: email || user?.email,
+        channel,
       });
 
       if (response.data?.success) {
         if (user) {
           const verifiedUser: User = {
             ...user,
-            email_verified_at: new Date().toISOString(),
+            email_verified_at:
+              channel === 'email' ? new Date().toISOString() : user.email_verified_at,
+            phone_verified_at:
+              channel === 'sms' ? new Date().toISOString() : user.phone_verified_at,
           };
           await persistUser(verifiedUser);
         }
         return {
           success: true,
-          message: response.data?.message || 'Your email has been successfully verified!',
+          message: response.data?.message || 'Your account has been successfully verified!',
         };
       }
+
       return {
         success: false,
         message: response.data?.message || 'The entered code is incorrect or expired.',
@@ -241,6 +282,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const response = await apiClient.post('/email/change', {
         email: newEmail.trim().toLowerCase(),
       });
+
       if (user) {
         const updatedUser: User = {
           ...user,
@@ -249,6 +291,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
         await persistUser(updatedUser);
       }
+
       return {
         success: true,
         message: response.data?.message || 'Email updated. A new code has been dispatched.',
@@ -276,20 +319,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const verifyReactivationOtp = async (otp: string): Promise<AuthResponse> => {
+  const verifyReactivationOtp = async (
+    otp: string,
+    autoCommit = false
+  ): Promise<AuthResponse & { token?: string; user?: User }> => {
     try {
       const response = await apiClient.post('/reactivate/verify-otp', {
         otp: otp.trim(),
       });
+
       const { token: receivedToken, user: receivedUser } = response.data;
-      if (receivedToken && receivedUser) {
+
+      if (autoCommit && receivedToken && receivedUser) {
         await setStoredToken(receivedToken);
         await persistUser(receivedUser);
         setToken(receivedToken);
       }
+
       return {
         success: true,
         message: response.data?.message || 'Welcome back! Your account has been reactivated.',
+        token: receivedToken,
+        user: receivedUser,
       };
     } catch (error) {
       return {
@@ -297,6 +348,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         message: extractErrorMessage(error),
       };
     }
+  };
+
+  const completeReactivation = async (sessionToken: string, sessionUser: User): Promise<void> => {
+    await setStoredToken(sessionToken);
+    await persistUser(sessionUser);
+    setToken(sessionToken);
   };
 
   const refreshUserProfile = async (): Promise<void> => {
@@ -342,13 +399,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         street: dep.street || parentUser?.street || '',
       },
     };
-
     setPendingPromotionData(promotionPayload);
     await logout();
   };
 
-  const isAuthenticated = !!token && !!user;
-  const isEmailVerified = !!user?.email_verified_at;
+  const isAuthenticated = Boolean(token && user);
+  const isEmailVerified = Boolean(user?.email_verified_at || user?.phone_verified_at);
 
   return (
     <AuthContext.Provider
@@ -365,10 +421,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         logout,
         logoutAndRegister,
         sendOtp,
+        sendSmsOtp,
         verifyOtp,
         changeUnverifiedEmail,
         sendReactivationOtp,
         verifyReactivationOtp,
+        completeReactivation,
         refreshUserProfile,
         setUser,
       }}>
