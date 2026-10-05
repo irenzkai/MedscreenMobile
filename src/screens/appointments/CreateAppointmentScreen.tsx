@@ -117,10 +117,11 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
   // Referral Attachment
   const [referralFile, setReferralFile] = useState<AttachedFile | null>(null);
 
-  // Step 3: Tests
+  // Step 3: Tests & Category Tabs
   const [allServices, setAllServices] = useState<Service[]>([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState<number[]>([]);
   const [testSearch, setTestSearch] = useState('');
+  const [serviceCategory, setServiceCategory] = useState<'individual' | 'package' | 'all'>('individual');
 
   // Step 4: Schedule
   const [appointmentDate, setAppointmentDate] = useState<string>('');
@@ -307,6 +308,21 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
       .reduce((sum, s) => sum + Number(s.price), 0);
   }, [allServices, selectedServiceIds]);
 
+  // Dynamic filter for Step 3
+  const filteredServices = useMemo(() => {
+    return allServices.filter((svc) => {
+      const matchesCategory =
+        serviceCategory === 'all' || svc.category === serviceCategory;
+      const query = testSearch.trim().toLowerCase();
+      const matchesSearch =
+        !query ||
+        svc.name.toLowerCase().includes(query) ||
+        svc.description?.toLowerCase().includes(query) ||
+        (svc.preparation && svc.preparation.toLowerCase().includes(query));
+      return matchesCategory && matchesSearch;
+    });
+  }, [allServices, serviceCategory, testSearch]);
+
   const pickFile = async (type: 'referral' | 'receipt') => {
     try {
       const res = await DocumentPicker.getDocumentAsync({
@@ -442,10 +458,8 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
       formData.append('patient_birthdate', birthdate.trim());
       formData.append('patient_phone', formatToStandardPhone(phoneDisplay));
 
-      // Append user account email so it saves directly to the patient_email database column
       const resolvedEmail = user?.email ? user.email.trim().toLowerCase() : '';
       formData.append('patient_email', resolvedEmail);
-
       formData.append('patient_province', province.trim().toUpperCase());
       formData.append('patient_city', city.trim().toUpperCase());
       formData.append('patient_barangay', barangay.trim().toUpperCase());
@@ -672,7 +686,10 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
               </View>
               <TouchableOpacity
                 onPress={handleResetStep2Details}
-                style={[styles.resetHeaderBtn, { borderColor: theme.brandAccent, backgroundColor: theme.surfaceSubtle }]}
+                style={[
+                  styles.resetHeaderBtn,
+                  { borderColor: theme.brandAccent, backgroundColor: theme.surfaceSubtle },
+                ]}
                 hitSlop={8}>
                 <Ionicons name="refresh-outline" size={12} color={theme.brandAccent} />
                 <Text style={[styles.resetHeaderBtnText, { color: theme.brandAccent }]}>
@@ -891,7 +908,7 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
           </View>
         )}
 
-        {/* STEP 3: SERVICES */}
+        {/* STEP 3: SERVICES WITH CATEGORIZATION & BOTTOM TOTAL BILL */}
         {currentStep === 3 && (
           <View>
             <Text style={[styles.stepTitle, { color: theme.textMain }]}>
@@ -905,19 +922,102 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
               patient.
             </Text>
 
+            {/* Category Navigation Pills */}
+            <View style={styles.tabPillsRow}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setServiceCategory('individual')}
+                style={[
+                  styles.tabPill,
+                  {
+                    backgroundColor: serviceCategory === 'individual' ? theme.brandAccent : theme.bgCard,
+                    borderColor: serviceCategory === 'individual' ? theme.brandAccent : theme.borderColor,
+                  },
+                ]}>
+                <Ionicons
+                  name="flask-outline"
+                  size={13}
+                  color={serviceCategory === 'individual' ? '#1C232D' : theme.textMuted}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.tabPillText,
+                    { color: serviceCategory === 'individual' ? '#1C232D' : theme.textMuted },
+                  ]}>
+                  Individual Tests
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setServiceCategory('package')}
+                style={[
+                  styles.tabPill,
+                  {
+                    backgroundColor: serviceCategory === 'package' ? theme.brandAccent : theme.bgCard,
+                    borderColor: serviceCategory === 'package' ? theme.brandAccent : theme.borderColor,
+                  },
+                ]}>
+                <Ionicons
+                  name="medkit-outline"
+                  size={13}
+                  color={serviceCategory === 'package' ? '#1C232D' : theme.textMuted}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.tabPillText,
+                    { color: serviceCategory === 'package' ? '#1C232D' : theme.textMuted },
+                  ]}>
+                  Packages
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setServiceCategory('all')}
+                style={[
+                  styles.tabPill,
+                  {
+                    backgroundColor: serviceCategory === 'all' ? theme.brandAccent : theme.bgCard,
+                    borderColor: serviceCategory === 'all' ? theme.brandAccent : theme.borderColor,
+                  },
+                ]}>
+                <Ionicons
+                  name="apps-outline"
+                  size={13}
+                  color={serviceCategory === 'all' ? '#1C232D' : theme.textMuted}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.tabPillText,
+                    { color: serviceCategory === 'all' ? '#1C232D' : theme.textMuted },
+                  ]}>
+                  All Tests
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Test Search Input */}
             <Input
-              placeholder="Search tests by name..."
+              placeholder="Search tests by name, preparation, or scope..."
               value={testSearch}
               onChangeText={setTestSearch}
+              containerStyle={{ marginBottom: Spacing.sm }}
             />
 
-            {allServices
-              .filter(
-                (s) =>
-                  !testSearch ||
-                  s.name.toLowerCase().includes(testSearch.toLowerCase())
-              )
-              .map((svc) => {
+            {filteredServices.length === 0 ? (
+              <View style={[styles.emptyBox, { borderColor: theme.borderColor }]}>
+                <Ionicons name="search-outline" size={32} color={theme.textMuted} />
+                <Text style={[styles.emptyTitle, { color: theme.textMain }]}>No Tests Found</Text>
+                <Text style={[styles.emptySub, { color: theme.textMuted }]}>
+                  No examinations match your current category and search query.
+                </Text>
+              </View>
+            ) : (
+              filteredServices.map((svc) => {
                 const isRestricted =
                   (svc.gender_restriction === 'female' && sex === 'Male') ||
                   (svc.gender_restriction === 'male' && sex === 'Female');
@@ -931,7 +1031,27 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
                     disabledReason={isRestricted ? `Unavailable for ${sex} patients` : undefined}
                   />
                 );
-              })}
+              })
+            )}
+
+            {/* Total Bill Section Card placed at the Very Bottom */}
+            <Card style={[styles.stepCard, styles.totalBillCard, { borderColor: theme.brandAccent }]}>
+              <View style={styles.totalBillRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.totalBillLabel, { color: theme.textMuted }]}>
+                    TOTAL BILLING ({selectedServiceIds.length} SELECTED)
+                  </Text>
+                  <Text style={[styles.totalBillSub, { color: theme.textMain }]}>
+                    {selectedServiceIds.length === 0
+                      ? 'Select at least one test to proceed'
+                      : `${selectedServiceIds.length} diagnostic test${selectedServiceIds.length > 1 ? 's' : ''} chosen`}
+                  </Text>
+                </View>
+                <Text style={[styles.totalBillAmount, { color: theme.brandAccent }]}>
+                  {formatCurrency(totalBill)}
+                </Text>
+              </View>
+            </Card>
           </View>
         )}
 
@@ -1154,18 +1274,12 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
                 </View>
                 <Text style={[styles.cancellationText, { color: theme.textMuted }]}>
                   Cancellations made{' '}
-                  <Text style={{ fontWeight: '800', color: theme.textMain }}>
-                    more than 24 hours
-                  </Text>{' '}
+                  <Text style={{ fontWeight: '800', color: theme.textMain }}>more than 24 hours</Text>{' '}
                   prior to your scheduled visit qualify for a{' '}
-                  <Text style={{ fontWeight: '800', color: theme.textMain }}>
-                    100% full refund
-                  </Text>
-                  . Cancellations requested{' '}
-                  <Text style={{ fontWeight: '800', color: theme.textMain }}>
-                    within 24 hours
-                  </Text>{' '}
-                  of your scheduled time are subject to a{' '}
+                  <Text style={{ fontWeight: '800', color: theme.textMain }}>100% full refund</Text>.
+                  Cancellations requested{' '}
+                  <Text style={{ fontWeight: '800', color: theme.textMain }}>within 24 hours</Text> of
+                  your scheduled time are subject to a{' '}
                   <Text style={{ fontWeight: '800', color: theme.textMain }}>
                     50% administrative cancellation fee
                   </Text>{' '}
@@ -1210,7 +1324,6 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
             <Text style={[styles.successDesc, { color: theme.textMuted }]}>
               Your clinical appointment has been registered and successfully sent for laboratory review.
             </Text>
-
             <View
               style={[
                 styles.successSummaryCard,
@@ -1222,14 +1335,12 @@ export const CreateAppointmentScreen: React.FC<Props> = ({ navigation, route }) 
                   {formatPatientName(firstName, middleName, lastName, suffix)}
                 </Text>
               </View>
-
               <View style={styles.successRow}>
                 <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Schedule:</Text>
                 <Text style={[styles.successRowVal, { color: theme.textMain }]}>
                   {formatDate(appointmentDate)} • {selectedSlotDisplay}
                 </Text>
               </View>
-
               <View style={styles.successRow}>
                 <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Total Bill:</Text>
                 <Text style={[styles.successRowVal, { color: theme.brandAccent }]}>
@@ -1408,6 +1519,70 @@ const styles = StyleSheet.create({
     flex: 1,
     marginHorizontal: 8,
   },
+  tabPillsRow: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    marginBottom: Spacing.sm,
+  },
+  tabPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+  },
+  tabPillText: {
+    fontSize: Typography.sizes.xs - 2,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  emptyBox: {
+    padding: Spacing.xl,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: Spacing.sm,
+  },
+  emptyTitle: {
+    fontSize: Typography.sizes.sm,
+    fontWeight: '800',
+    marginTop: Spacing.xs,
+    textTransform: 'uppercase',
+  },
+  emptySub: {
+    fontSize: Typography.sizes.xs - 1,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  totalBillCard: {
+    borderWidth: 1.5,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.xs,
+  },
+  totalBillRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  totalBillLabel: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  totalBillSub: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  totalBillAmount: {
+    fontSize: Typography.sizes.lg,
+    fontWeight: '900',
+  },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1477,17 +1652,6 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     marginTop: Spacing.xs,
-  },
-  refBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: BorderRadius.pill,
-    marginBottom: Spacing.sm,
-  },
-  refBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
   },
   successDesc: {
     fontSize: Typography.sizes.xs,

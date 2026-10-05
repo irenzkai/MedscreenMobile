@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,6 @@ import { Appointment, Service } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
-import { ActionModal } from '../../components/common/ActionModal';
 import {
   formatCurrency,
   formatDate,
@@ -33,8 +32,6 @@ import {
   isAppointmentExpired,
   getEffectiveAppointmentStatus,
 } from '../../utils/formatters';
-import { openWebUrl } from '../../utils/externalLinks';
-import { EXTERNAL_ROUTES } from '../../constants/config';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
 type NavigationProp = CompositeNavigationProp<
@@ -47,14 +44,12 @@ export const DashboardScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp>();
   const { user } = useAuth();
+
   const [recentAppointments, setRecentAppointments] = useState<Appointment[]>([]);
   const [popularServices, setPopularServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-
-  // External site redirect modal
-  const [bulkRedirectModalVisible, setBulkRedirectModalVisible] = useState<boolean>(false);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -67,9 +62,11 @@ export const DashboardScreen: React.FC = () => {
         appointmentsApi.getAppointments(),
         servicesApi.getServices(),
       ]);
+
       const combined = [...appData.self, ...appData.dependents].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
+
       setRecentAppointments(combined.slice(0, 5));
       setPopularServices(svcList.slice(0, 3));
     } catch (error) {
@@ -87,6 +84,18 @@ export const DashboardScreen: React.FC = () => {
   const onRefresh = () => {
     setRefreshing(true);
     loadDashboardData();
+  };
+
+  // Dynamic fallback calculation for 5+ digit amounts
+  const getEffectiveAmount = (app: Appointment): number => {
+    const amountVal = Number(app.payment_amount);
+    if (!isNaN(amountVal) && amountVal > 0) {
+      return amountVal;
+    }
+    if (app.services && app.services.length > 0) {
+      return app.services.reduce((sum, s) => sum + Number(s.price || 0), 0);
+    }
+    return 0;
   };
 
   const formattedDate = currentTime.toLocaleDateString('en-US', {
@@ -176,77 +185,66 @@ export const DashboardScreen: React.FC = () => {
           </View>
         </Card>
 
-        {/* Quick Actions */}
+        {/* Quick Actions Section */}
         <Text style={[styles.sectionHeading, { color: theme.textMain }]}>Quick Actions</Text>
-        <View style={styles.actionCardsGrid}>
-          {/* New Booking */}
-          <Card
-            style={styles.actionCard}
-            onPress={() => navigation.navigate('CreateAppointment')}>
-            <View style={[styles.actionIconWrap, { backgroundColor: theme.surfaceSubtle }]}>
-              <Ionicons name="calendar-outline" size={24} color={theme.brandAccent} />
-            </View>
-            <Text style={[styles.actionCardTitle, { color: theme.textMain }]}>New Booking</Text>
-            <Text style={[styles.actionCardDesc, { color: theme.textMuted }]}>
-              Schedule laboratory tests for yourself or family.
-            </Text>
-            <View style={styles.actionArrow}>
-              <Text style={[styles.actionCardLink, { color: theme.brandAccent }]}>Book Now</Text>
-              <Ionicons name="arrow-forward" size={14} color={theme.brandAccent} />
-            </View>
-          </Card>
 
+        {/* 1. Extended Full-Width New Booking Card */}
+        <Card
+          style={styles.featuredActionCard}
+          onPress={() => navigation.navigate('CreateAppointment')}>
+          <View style={styles.featuredActionRow}>
+            <View style={[styles.featuredIconWrap, { backgroundColor: theme.surfaceSubtle }]}>
+              <Ionicons name="calendar" size={26} color={theme.brandAccent} />
+            </View>
+
+            <View style={{ flex: 1, marginHorizontal: Spacing.sm }}>
+              <Text style={[styles.featuredCardTitle, { color: theme.textMain }]}>
+                New Appointment Booking
+              </Text>
+              <Text style={[styles.featuredCardDesc, { color: theme.textMuted }]}>
+                Schedule diagnostic laboratory tests & packages for yourself or minor dependents.
+              </Text>
+            </View>
+
+            <View style={[styles.featuredArrowBtn, { backgroundColor: theme.brandAccent }]}>
+              <Ionicons name="arrow-forward" size={18} color="#1C232D" />
+            </View>
+          </View>
+        </Card>
+
+        {/* 2. Secondary Actions in 50/50 Row */}
+        <View style={styles.secondaryCardsRow}>
           {/* Result Archive */}
           <Card
-            style={styles.actionCard}
+            style={styles.actionCardHalf}
             onPress={() => navigation.navigate('MedicalHistory')}>
             <View style={[styles.actionIconWrap, { backgroundColor: theme.surfaceSubtle }]}>
-              <Ionicons name="document-text-outline" size={24} color={theme.brandAccent} />
+              <Ionicons name="document-text-outline" size={22} color={theme.brandAccent} />
             </View>
             <Text style={[styles.actionCardTitle, { color: theme.textMain }]}>Result Archive</Text>
-            <Text style={[styles.actionCardDesc, { color: theme.textMuted }]}>
+            <Text style={[styles.actionCardDesc, { color: theme.textMuted }]} numberOfLines={2}>
               Securely view and preview your diagnostic results.
             </Text>
             <View style={styles.actionArrow}>
               <Text style={[styles.actionCardLink, { color: theme.brandAccent }]}>View History</Text>
-              <Ionicons name="arrow-forward" size={14} color={theme.brandAccent} />
+              <Ionicons name="arrow-forward" size={13} color={theme.brandAccent} />
             </View>
           </Card>
 
           {/* Dependents */}
           <Card
-            style={styles.actionCard}
+            style={styles.actionCardHalf}
             onPress={() => navigation.navigate('ManageDependents')}>
             <View style={[styles.actionIconWrap, { backgroundColor: theme.surfaceSubtle }]}>
-              <Ionicons name="people-outline" size={24} color={theme.brandAccent} />
+              <Ionicons name="people-outline" size={22} color={theme.brandAccent} />
             </View>
             <Text style={[styles.actionCardTitle, { color: theme.textMain }]}>Dependents</Text>
-            <Text style={[styles.actionCardDesc, { color: theme.textMuted }]}>
+            <Text style={[styles.actionCardDesc, { color: theme.textMuted }]} numberOfLines={2}>
               Manage profiles and bookings for minor children.
             </Text>
             <View style={styles.actionArrow}>
               <Text style={[styles.actionCardLink, { color: theme.brandAccent }]}>Manage</Text>
-              <Ionicons name="arrow-forward" size={14} color={theme.brandAccent} />
-            </View>
-          </Card>
-
-          {/* Bulk (Unified Modal Redirect) */}
-          <Card
-            style={styles.actionCard}
-            onPress={() => setBulkRedirectModalVisible(true)}>
-            <View style={[styles.actionIconWrap, { backgroundColor: 'rgba(255, 193, 7, 0.1)' }]}>
-              <Ionicons name="business-outline" size={24} color={theme.warning} />
-            </View>
-            <View style={styles.lockedRow}>
-              <Text style={[styles.actionCardTitle, { color: theme.textMain }]}>Bulk</Text>
-              <Ionicons name="lock-closed" size={12} color={theme.warning} />
-            </View>
-            <Text style={[styles.actionCardDesc, { color: theme.textMuted }]}>
-              Batch bookings are exclusive to the web portal.
-            </Text>
-            <View style={styles.actionArrow}>
-              <Text style={[styles.actionCardLink, { color: theme.warning }]}>Web Only</Text>
-              <Ionicons name="open-outline" size={14} color={theme.warning} />
+              <Ionicons name="arrow-forward" size={13} color={theme.brandAccent} />
             </View>
           </Card>
         </View>
@@ -262,7 +260,11 @@ export const DashboardScreen: React.FC = () => {
         </View>
 
         {loading ? (
-          <ActivityIndicator size="small" color={theme.brandAccent} style={{ marginVertical: Spacing.lg }} />
+          <ActivityIndicator
+            size="small"
+            color={theme.brandAccent}
+            style={{ marginVertical: Spacing.lg }}
+          />
         ) : recentAppointments.length === 0 ? (
           <Card style={styles.emptyCard}>
             <Ionicons name="calendar-outline" size={32} color={theme.textMuted} />
@@ -280,15 +282,20 @@ export const DashboardScreen: React.FC = () => {
           recentAppointments.map((app) => {
             const isExpired = isAppointmentExpired(app);
             const effectiveStatus = getEffectiveAppointmentStatus(app);
+            const effectiveAmt = getEffectiveAmount(app);
 
             return (
               <Card
                 key={app.id}
                 style={styles.recentItemCard}
-                onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: app.id })}>
+                onPress={() =>
+                  navigation.navigate('AppointmentDetail', { appointmentId: app.id })
+                }>
                 <View style={styles.recentItemRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.recentPatientName, { color: theme.textMain }]} numberOfLines={1}>
+                    <Text
+                      style={[styles.recentPatientName, { color: theme.textMain }]}
+                      numberOfLines={1}>
                       {formatPatientName(
                         app.patient_first_name,
                         app.patient_middle_name,
@@ -296,17 +303,20 @@ export const DashboardScreen: React.FC = () => {
                         app.patient_suffix
                       )}
                     </Text>
-                    <Text style={[styles.recentTests, { color: theme.textMuted }]} numberOfLines={1}>
+                    <Text
+                      style={[styles.recentTests, { color: theme.textMuted }]}
+                      numberOfLines={1}>
                       {app.services?.map((s) => s.name).join(', ') || 'Diagnostic Tests'}
                     </Text>
                     <Text style={[styles.recentSchedule, { color: theme.brandAccent }]}>
                       {formatDate(app.appointment_date)} at {formatTimeSlot(app.time_slot)}
                     </Text>
                   </View>
+
                   <View style={styles.recentItemRight}>
                     <Badge status={effectiveStatus} isExpired={isExpired} size="sm" />
-                    <Text style={[styles.recentPrice, { color: theme.textMain }]}>
-                      {formatCurrency(app.payment_amount || 0)}
+                    <Text style={[styles.recentPrice, { color: theme.brandAccent }]}>
+                      {formatCurrency(effectiveAmt)}
                     </Text>
                   </View>
                 </View>
@@ -329,7 +339,9 @@ export const DashboardScreen: React.FC = () => {
           <Card key={svc.id} style={styles.recommendedCard}>
             <View style={styles.recHeaderRow}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.recName, { color: theme.textMain }]}>{svc.name.toUpperCase()}</Text>
+                <Text style={[styles.recName, { color: theme.textMain }]}>
+                  {svc.name.toUpperCase()}
+                </Text>
                 <Text style={[styles.recDesc, { color: theme.textMuted }]}>
                   {svc.description}
                 </Text>
@@ -356,23 +368,6 @@ export const DashboardScreen: React.FC = () => {
           </Card>
         ))}
       </ScrollView>
-
-      {/* UNIFIED MODAL: External Bulk Website Redirection */}
-      <ActionModal
-        visible={bulkRedirectModalVisible}
-        type="info"
-        icon="globe-outline"
-        title="Open Web Portal"
-        message="Bulk spreadsheet imports, employee list verification, and enterprise bookings are managed on our official website. Proceed to open in your browser?"
-        confirmText="Open Website"
-        cancelText="Stay in App"
-        confirmVariant="primary"
-        onClose={() => setBulkRedirectModalVisible(false)}
-        onConfirm={() => {
-          setBulkRedirectModalVisible(false);
-          openWebUrl(EXTERNAL_ROUTES.BULK_APPOINTMENT);
-        }}
-      />
     </View>
   );
 };
@@ -419,7 +414,12 @@ const styles = StyleSheet.create({
   welcomeSub: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   welcomeTitle: { fontSize: Typography.sizes.lg, fontWeight: '900', marginTop: 2 },
   welcomeDesc: { fontSize: Typography.sizes.xs, marginTop: 4, lineHeight: 16 },
-  clockBox: { padding: Spacing.sm, borderRadius: BorderRadius.md, alignItems: 'flex-end', marginLeft: Spacing.sm },
+  clockBox: {
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    alignItems: 'flex-end',
+    marginLeft: Spacing.sm,
+  },
   clockDate: { fontSize: 9, fontWeight: '700', textTransform: 'uppercase' },
   clockTime: { fontSize: Typography.sizes.sm, fontWeight: '900', marginTop: 2 },
   sectionHeading: {
@@ -429,26 +429,85 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: Spacing.sm,
   },
-  actionCardsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
+
+  // Featured Extended New Booking Card
+  featuredActionCard: {
+    width: '100%',
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
   },
-  actionCard: { width: '48%', padding: Spacing.md },
-  actionIconWrap: {
-    width: 44,
-    height: 44,
+  featuredActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  featuredIconWrap: {
+    width: 48,
+    height: 48,
     borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.sm,
   },
-  lockedRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  actionCardTitle: { fontSize: Typography.sizes.xs, fontWeight: '800', textTransform: 'uppercase' },
-  actionCardDesc: { fontSize: 10, marginTop: 4, lineHeight: 14, minHeight: 28 },
-  actionArrow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: Spacing.sm },
-  actionCardLink: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  featuredCardTitle: {
+    fontSize: Typography.sizes.sm,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  featuredCardDesc: {
+    fontSize: 11,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  featuredArrowBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // 50/50 Secondary Actions Row
+  secondaryCardsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  actionCardHalf: {
+    flex: 1,
+    padding: Spacing.md,
+  },
+  actionIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.xs,
+  },
+  actionCardTitle: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  actionCardDesc: {
+    fontSize: 10,
+    marginTop: 3,
+    lineHeight: 14,
+    minHeight: 28,
+  },
+  actionArrow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: Spacing.xs,
+  },
+  actionCardLink: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -456,17 +515,40 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   viewAllText: { fontSize: Typography.sizes.xs, fontWeight: '800', letterSpacing: 0.5 },
-  emptyCard: { padding: Spacing.lg, alignItems: 'center', justifyContent: 'center', marginVertical: Spacing.xs },
+  emptyCard: {
+    padding: Spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: Spacing.xs,
+  },
   emptyText: { fontSize: Typography.sizes.xs, marginTop: Spacing.xs, textAlign: 'center' },
   recentItemCard: { marginBottom: Spacing.xs, padding: Spacing.md },
   recentItemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  recentPatientName: { fontSize: Typography.sizes.sm, fontWeight: '800', textTransform: 'uppercase' },
+  recentPatientName: {
+    fontSize: Typography.sizes.sm,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
   recentTests: { fontSize: Typography.sizes.xs - 1, marginTop: 2 },
   recentSchedule: { fontSize: Typography.sizes.xs - 1, fontWeight: '700', marginTop: 4 },
-  recentItemRight: { alignItems: 'flex-end', gap: 6 },
-  recentPrice: { fontSize: Typography.sizes.xs, fontWeight: '800' },
+  recentItemRight: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    flexShrink: 0,
+    marginLeft: Spacing.sm,
+    gap: 4,
+  },
+  recentPrice: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
   recommendedCard: { marginBottom: Spacing.sm, padding: Spacing.md },
-  recHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  recHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
   recName: { fontSize: Typography.sizes.sm, fontWeight: '800' },
   recDesc: { fontSize: Typography.sizes.xs - 1, marginTop: 2, lineHeight: 16 },
   recPrice: { fontSize: Typography.sizes.sm, fontWeight: '900', marginLeft: Spacing.sm },
@@ -477,7 +559,14 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     paddingTop: Spacing.xs,
   },
-  sampleBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.sm },
+  sampleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.sm,
+  },
   sampleBadgeText: { fontSize: 10, fontWeight: '700' },
   bookTestBtn: {
     flexDirection: 'row',

@@ -22,6 +22,7 @@ import { Card } from '../../components/common/Card';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { NoticeBox } from '../../components/common/NoticeBox';
+import { ActionModal } from '../../components/common/ActionModal';
 import { DatePickerModal } from '../../components/common/DatePickerModal';
 import { AddressSelector } from '../../components/common/AddressSelector';
 import {
@@ -35,6 +36,7 @@ import {
   validateRequired,
   calculateAge,
 } from '../../utils/validators';
+import { formatPatientName } from '../../utils/formatters';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateDependent'>;
@@ -63,6 +65,7 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
   // UI / Modal States
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
@@ -122,7 +125,6 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
     if (!barangay.trim()) errs.barangay = 'Barangay is required.';
 
     setFieldErrors(errs);
-
     if (Object.keys(errs).length > 0) {
       showError('Please review the highlighted omissions below before saving.');
       return;
@@ -142,15 +144,17 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
         barangay: barangay.trim().toUpperCase(),
         street: street.trim().toUpperCase(),
       });
-
-      Alert.alert('Success', 'Child dependent profile registered successfully.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      setSuccessModalVisible(true);
     } catch (err: any) {
       showError(err?.message || 'Could not register dependent. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSuccessDismiss = () => {
+    setSuccessModalVisible(false);
+    navigation.goBack();
   };
 
   const liveAge = birthdate ? calculateAge(birthdate) : null;
@@ -172,7 +176,6 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
         scrollEventThrottle={16}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled">
-        
         {errorBanner ? (
           <NoticeBox
             type="danger"
@@ -185,8 +188,7 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
         <Card style={styles.policyCard}>
           <Ionicons name="information-circle-outline" size={20} color={theme.brandAccent} />
           <Text style={[styles.policyText, { color: theme.textMuted }]}>
-            In compliance with Philippine health guidelines, family dependent profiles are
-            strictly reserved for minor children under 18 years of age.
+            In compliance with Philippine health guidelines, family dependent profiles are strictly reserved for minor children under 18 years of age.
           </Text>
         </Card>
 
@@ -225,6 +227,7 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
               />
             </View>
           </View>
+
           {!noMiddleName && (
             <Input
               value={middleName}
@@ -401,6 +404,56 @@ export const CreateDependentScreen: React.FC<Props> = ({ navigation }) => {
           }
         }}
       />
+
+      {/* UNIFIED MODAL: Dependent Creation Success Prompt */}
+      <ActionModal
+        visible={successModalVisible}
+        type="success"
+        icon="checkmark-circle-outline"
+        title="Dependent Registered"
+        confirmText="OK"
+        isSingleAction={true}
+        confirmVariant="primary"
+        onClose={handleSuccessDismiss}
+        onConfirm={handleSuccessDismiss}
+        message={
+          <View style={styles.successModalContent}>
+            <Text style={[styles.successModalPrompt, { color: theme.textMain }]}>
+              Child dependent profile registered successfully.
+            </Text>
+
+            <View
+              style={[
+                styles.successSummaryCard,
+                {
+                  backgroundColor: theme.surfaceSubtle,
+                  borderColor: theme.borderColor,
+                },
+              ]}>
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Name:</Text>
+                <Text style={[styles.successRowVal, { color: theme.textMain }]} numberOfLines={1}>
+                  {formatPatientName(firstName, middleName, lastName, suffix)}
+                </Text>
+              </View>
+
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Age / Sex:</Text>
+                <Text style={[styles.successRowVal, { color: theme.textMain }]}>
+                  {liveAge !== null ? `${liveAge} YRS OLD` : 'MINOR'} • {sex.toUpperCase()}
+                </Text>
+              </View>
+
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Status:</Text>
+                <Text style={[styles.successRowVal, { color: theme.brandAccent }]}>
+                  Active Minor Dependent
+                </Text>
+              </View>
+            </View>
+          </View>
+        }
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -463,5 +516,52 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.md,
+  },
+
+  // Success Modal Styles
+  successModalContent: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  successModalPrompt: {
+    fontSize: Typography.sizes.xs + 1,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  successSummaryCard: {
+    width: '100%',
+    padding: Spacing.sm + 2,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    gap: 6,
+    marginBottom: Spacing.md,
+  },
+  successRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  successRowLabel: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '600',
+  },
+  successRowVal: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '800',
+    flex: 1,
+    textAlign: 'right',
+    marginLeft: 8,
+  },
+  successNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  successNoteText: {
+    fontSize: 10,
+    flex: 1,
+    lineHeight: 14,
   },
 });

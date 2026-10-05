@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Appointment } from '../../types';
@@ -42,9 +42,8 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
   // Dynamically compute expiration matching the 24-hour server policy
   const isExpired = isAppointmentExpired(appointment);
   const effectiveStatus = getEffectiveAppointmentStatus(appointment);
-
-  const isBulk = !!appointment.batch_id;
-  const isDependent = !!appointment.dependent_id;
+  const isBulk = !appointment.batch_id;
+  const isDependent = !appointment.dependent_id;
   const categoryLabel = isBulk ? 'BULK' : isDependent ? 'DEPENDENT' : 'PERSONAL';
 
   const canResubmit =
@@ -63,6 +62,19 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
     appointment.payment_status !== 'paid';
 
   const hasReleasedResults = effectiveStatus === 'released';
+
+  // Calculate sum of services if payment_amount is 0/unsettled
+  const computedServicesTotal = useMemo(() => {
+    return (appointment.services || []).reduce(
+      (sum, s) => sum + Number(s.price || 0),
+      0
+    );
+  }, [appointment.services]);
+
+  const effectiveAmount = useMemo(() => {
+    const amountVal = Number(appointment.payment_amount);
+    return !isNaN(amountVal) && amountVal > 0 ? amountVal : computedServicesTotal;
+  }, [appointment.payment_amount, computedServicesTotal]);
 
   return (
     <Card
@@ -89,7 +101,6 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
             </Text>
           </View>
         </View>
-
         <Badge status={effectiveStatus} isExpired={isExpired} size="sm" />
       </View>
 
@@ -141,7 +152,7 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
 
       {/* Billing & Settlement Row with Refund State Handling */}
       <View style={[styles.billingRow, { backgroundColor: theme.surfaceSubtle }]}>
-        <View>
+        <View style={styles.billingLeftCol}>
           <Text style={[styles.billingLabel, { color: theme.textMuted }]}>
             Payment ({appointment.payment_method})
           </Text>
@@ -160,7 +171,6 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
               ]}>
               {appointment.payment_status.toUpperCase()}
             </Text>
-
             {appointment.payment_status === 'refunded' && (
               <View style={[styles.refundPill, { backgroundColor: 'rgba(13, 202, 240, 0.15)' }]}>
                 <Text style={[styles.refundPillText, { color: theme.info }]}>RETURNED</Text>
@@ -168,9 +178,10 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
             )}
           </View>
         </View>
+
         <View style={styles.amountBox}>
           <Text style={[styles.amountText, { color: theme.brandAccent }]}>
-            {formatCurrency(appointment.payment_amount || 0)}
+            {formatCurrency(effectiveAmount)}
           </Text>
         </View>
       </View>
@@ -345,6 +356,10 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     marginTop: Spacing.sm,
   },
+  billingLeftCol: {
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
   billingLabel: {
     fontSize: Typography.sizes.xs - 1,
     fontWeight: '700',
@@ -367,10 +382,14 @@ const styles = StyleSheet.create({
   },
   amountBox: {
     alignItems: 'flex-end',
+    justifyContent: 'center',
+    flexShrink: 0,
+    marginLeft: Spacing.sm,
   },
   amountText: {
     fontSize: Typography.sizes.md,
     fontWeight: '900',
+    textAlign: 'right',
   },
   alertBanner: {
     flexDirection: 'row',

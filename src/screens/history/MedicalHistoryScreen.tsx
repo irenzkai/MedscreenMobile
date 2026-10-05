@@ -21,6 +21,7 @@ import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { NoticeBox } from '../../components/common/NoticeBox';
+import { ActionModal } from '../../components/common/ActionModal';
 import { LightboxModal } from '../../components/common/LightboxModal';
 import {
   resolveFileUrl,
@@ -54,6 +55,14 @@ export const MedicalHistoryScreen: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [handshakeLoading, setHandshakeLoading] = useState<boolean>(false);
+
+  // Success Feedback Modal
+  const [successModalConfig, setSuccessModalConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+  }>({ visible: false, title: '', message: '' });
+
   const [noticeMessage, setNoticeMessage] = useState<{
     type: 'danger' | 'warning' | 'info' | 'success';
     text: string;
@@ -104,14 +113,34 @@ export const MedicalHistoryScreen: React.FC = () => {
     fetchHistory();
   };
 
+  // Dynamic fallback calculation for 5+ digit amounts
+  const getEffectiveAmount = (app: Appointment): number => {
+    const amountVal = Number(app.payment_amount);
+    if (!isNaN(amountVal) && amountVal > 0) {
+      return amountVal;
+    }
+    if (app.services && app.services.length > 0) {
+      return app.services.reduce((sum, s) => sum + Number(s.price || 0), 0);
+    }
+    return 0;
+  };
+
+  // Request Data Import Handshake
   const handleRequestDigitization = async () => {
     setHandshakeLoading(true);
     try {
       const res = await historyApi.requestDigitization();
-      if (res.success) {
-        setPermissionStatus('pending_staff');
-        showSuccess('Your request has been dispatched to laboratory staff for verification.');
-      }
+      // Immediately switch to the waiting state
+      setPermissionStatus('pending_staff');
+      setSuccessModalConfig({
+        visible: true,
+        title: 'Request Dispatched',
+        message:
+          res?.message ||
+          'Your data import request has been dispatched to laboratory staff for verification. The laboratory technician will compile your physical records shortly.',
+      });
+      showSuccess('Your request has been dispatched to laboratory staff for verification.');
+      await fetchHistory();
     } catch {
       showError('Could not send digitization request. Please try again.');
     } finally {
@@ -119,15 +148,21 @@ export const MedicalHistoryScreen: React.FC = () => {
     }
   };
 
+  // Accept Permission Handshake
   const handleAcceptPermission = async () => {
     setHandshakeLoading(true);
     try {
       const res = await historyApi.acceptDigitizationRequest();
-      if (res.success) {
-        setPermissionStatus('granted');
-        showSuccess('Your laboratory archive access has been authorized and initialized.');
-        fetchHistory();
-      }
+      setPermissionStatus('granted');
+      setSuccessModalConfig({
+        visible: true,
+        title: 'Access Authorized',
+        message:
+          res?.message ||
+          'Your laboratory archive access has been authorized and initialized.',
+      });
+      showSuccess('Your laboratory archive access has been authorized and initialized.');
+      await fetchHistory();
     } catch {
       showError('Could not authorize data digitization.');
     } finally {
@@ -359,6 +394,7 @@ export const MedicalHistoryScreen: React.FC = () => {
                 const isExpired = isAppointmentExpired(app);
                 const effectiveStatus = getEffectiveAppointmentStatus(app);
                 const patientAge = calculatePatientAge(app);
+                const effectiveAmt = getEffectiveAmount(app);
 
                 return (
                   <Card
@@ -399,9 +435,8 @@ export const MedicalHistoryScreen: React.FC = () => {
                         { borderTopColor: theme.borderColor },
                       ]}>
                       <Text style={[styles.totalBill, { color: theme.brandAccent }]}>
-                        {formatCurrency(app.payment_amount || 0)}
+                        {formatCurrency(effectiveAmt)}
                       </Text>
-
                       {renderAppointmentFooterStatus(app)}
                     </View>
                   </Card>
@@ -422,6 +457,7 @@ export const MedicalHistoryScreen: React.FC = () => {
                 colors={[theme.brandAccent]}
               />
             }>
+            {/* Handshake Phase 1: None */}
             {permissionStatus === 'none' && (
               <Card style={styles.handshakeCard}>
                 <View
@@ -439,8 +475,7 @@ export const MedicalHistoryScreen: React.FC = () => {
                   Historical Data Connection
                 </Text>
                 <Text style={[styles.handshakeDesc, { color: theme.textMuted }]}>
-                  Your legacy physical lab records are not digitized yet. Request our
-                  clinical personnel to scan and compile your historical records.
+                  Your legacy physical lab records are not digitized yet. Request our clinical personnel to scan and compile your historical records.
                 </Text>
                 <Button
                   title="Request Data Import"
@@ -452,6 +487,7 @@ export const MedicalHistoryScreen: React.FC = () => {
               </Card>
             )}
 
+            {/* Handshake Phase 2: Awaiting Laboratory Review (The Waiting Card) */}
             {permissionStatus === 'pending_staff' && (
               <Card style={styles.handshakeCard}>
                 <View
@@ -465,12 +501,12 @@ export const MedicalHistoryScreen: React.FC = () => {
                   Awaiting Laboratory Review
                 </Text>
                 <Text style={[styles.handshakeDesc, { color: theme.textMuted }]}>
-                  Your data import request has been dispatched. A laboratory technician is
-                  reviewing and compiling your physical archives.
+                  Your data import request has been dispatched. A laboratory technician is reviewing and compiling your physical archives.
                 </Text>
               </Card>
             )}
 
+            {/* Handshake Phase 3: Permission Required from Patient */}
             {permissionStatus === 'pending_patient' && (
               <Card style={styles.handshakeCard} variant="warning">
                 <View
@@ -484,8 +520,7 @@ export const MedicalHistoryScreen: React.FC = () => {
                   Permission Required
                 </Text>
                 <Text style={[styles.handshakeDesc, { color: theme.textMuted }]}>
-                  The laboratory is requesting your permission to digitize your past physical
-                  examination results under the Philippine Data Privacy Act.
+                  The laboratory is requesting your permission to digitize your past physical examination results under the Philippine Data Privacy Act.
                 </Text>
                 <Button
                   title="Allow Digitization"
@@ -497,6 +532,7 @@ export const MedicalHistoryScreen: React.FC = () => {
               </Card>
             )}
 
+            {/* Handshake Phase 4: Granted / Archived Records List */}
             {permissionStatus === 'granted' && (
               <View>
                 {existingRecords.length === 0 ? (
@@ -506,8 +542,7 @@ export const MedicalHistoryScreen: React.FC = () => {
                       No Digitized Records Yet
                     </Text>
                     <Text style={[styles.emptySubtitle, { color: theme.textMuted }]}>
-                      Permission has been granted. As soon as clinic staff scans your legacy
-                      documents, they will appear here.
+                      Permission has been granted. As soon as clinic staff scans your legacy documents, they will appear here.
                     </Text>
                   </Card>
                 ) : (
@@ -613,6 +648,17 @@ export const MedicalHistoryScreen: React.FC = () => {
         )}
       </View>
 
+      {/* UNIFIED MODAL: Action Success Acknowledgement */}
+      <ActionModal
+        visible={successModalConfig.visible}
+        type="success"
+        title={successModalConfig.title}
+        message={successModalConfig.message}
+        isSingleAction={true}
+        confirmText="OK"
+        onClose={() => setSuccessModalConfig((prev) => ({ ...prev, visible: false }))}
+      />
+
       {/* Lightbox Modal */}
       <LightboxModal
         visible={lightboxVisible}
@@ -681,7 +727,12 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
     marginTop: 4,
   },
-  totalBill: { fontSize: Typography.sizes.md, fontWeight: '900' },
+  totalBill: {
+    fontSize: Typography.sizes.md,
+    fontWeight: '900',
+    flexShrink: 0,
+    marginRight: Spacing.sm,
+  },
   viewReportBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -699,7 +750,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  processingText: { fontSize: Typography.sizes.xs, fontStyle: 'italic' },
+  processingText: { fontSize: Typography.sizes.xs, fontStyle: 'italic', flexShrink: 1, textAlign: 'right' },
   handshakeCard: {
     padding: Spacing.xl,
     alignItems: 'center',

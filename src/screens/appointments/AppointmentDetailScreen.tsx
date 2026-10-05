@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -99,6 +99,19 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
     loadDetails();
   }, [appointmentId]);
 
+  // Compute total from services catalog if payment_amount is 0/unsettled
+  const computedServicesTotal = useMemo(() => {
+    return (appointment?.services || []).reduce(
+      (sum, s) => sum + Number(s.price || 0),
+      0
+    );
+  }, [appointment?.services]);
+
+  const effectivePaymentAmount = useMemo(() => {
+    const amountVal = Number(appointment?.payment_amount);
+    return !isNaN(amountVal) && amountVal > 0 ? amountVal : computedServicesTotal;
+  }, [appointment?.payment_amount, computedServicesTotal]);
+
   if (loading) {
     return (
       <View style={[styles.screen, styles.center, { backgroundColor: theme.bgMain }]}>
@@ -185,7 +198,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
       const isScanImage = isImageDocument((appointment.result as any)?.lab_scan);
       availableReports.push({
         key: 'lab',
-        label: 'Laboratory Report',
+        label: 'Laboratory Examination Report',
         icon: 'flask-outline',
         previewUrl: isScanImage
           ? resolveFileUrl((appointment.result as any)?.lab_scan)
@@ -202,7 +215,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
       const isScanImage = isImageDocument(scanUri);
       availableReports.push({
         key: 'radio',
-        label: 'Radiology Report / X-Ray',
+        label: 'Radiology / Chest X-Ray',
         icon: 'scan-outline',
         previewUrl: isScanImage
           ? resolveFileUrl(scanUri)
@@ -217,7 +230,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
       const isScanImage = isImageDocument((appointment.result as any)?.drug_test_scan);
       availableReports.push({
         key: 'drug',
-        label: 'Drug Test Certificate',
+        label: 'Drug Test Certificate (CCDT)',
         icon: 'shield-checkmark-outline',
         previewUrl: isScanImage
           ? resolveFileUrl((appointment.result as any)?.drug_test_scan)
@@ -232,7 +245,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
       const isScanImage = isImageDocument((appointment.result as any)?.med_cert_scan);
       availableReports.push({
         key: 'med_cert',
-        label: 'Medical Certificate',
+        label: 'Medical Fitness Certificate',
         icon: 'ribbon-outline',
         previewUrl: isScanImage
           ? resolveFileUrl((appointment.result as any)?.med_cert_scan)
@@ -472,9 +485,16 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
               {resolvedPatientEmail}
             </Text>
           </View>
-          <View style={styles.keyValueRow}>
-            <Text style={[styles.keyText, { color: theme.textMuted }]}>Residential Address:</Text>
-            <Text style={[styles.valText, { color: theme.textMain }]}>
+
+          {/* Dedicated Full-Width Residential Address Block */}
+          <View style={[styles.addressBlock, { borderTopColor: theme.borderColor }]}>
+            <View style={styles.addressLabelRow}>
+              <Ionicons name="location-outline" size={13} color={theme.brandAccent} />
+              <Text style={[styles.addressLabel, { color: theme.textMuted }]}>
+                Residential Address:
+              </Text>
+            </View>
+            <Text style={[styles.addressVal, { color: theme.textMain }]}>
               {formatAddress(
                 appointment.patient_street,
                 appointment.patient_barangay,
@@ -510,7 +530,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
           <View style={styles.totalRow}>
             <Text style={[styles.totalLabel, { color: theme.brandAccent }]}>TOTAL BILLING</Text>
             <Text style={[styles.totalAmount, { color: theme.brandAccent }]}>
-              {formatCurrency(appointment.payment_amount || 0)}
+              {formatCurrency(effectivePaymentAmount)}
             </Text>
           </View>
         </Card>
@@ -545,7 +565,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
           </Card>
         ) : null}
 
-        {/* Payment Details with Refund Indication */}
+        {/* Payment Details with Refund Indication & Amount Display */}
         <Card style={styles.sectionCard}>
           <Text style={[styles.sectionTitle, { color: theme.brandAccent }]}>
             <Ionicons name="card-outline" size={14} /> Payment Details
@@ -554,6 +574,12 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
             <Text style={[styles.keyText, { color: theme.textMuted }]}>Method:</Text>
             <Text style={[styles.valText, { color: theme.textMain }]}>
               {appointment.payment_method}
+            </Text>
+          </View>
+          <View style={styles.keyValueRow}>
+            <Text style={[styles.keyText, { color: theme.textMuted }]}>Amount:</Text>
+            <Text style={[styles.valText, { color: theme.brandAccent, fontWeight: '900' }]}>
+              {formatCurrency(effectivePaymentAmount)}
             </Text>
           </View>
           <View style={styles.keyValueRow}>
@@ -933,25 +959,60 @@ const styles = StyleSheet.create({
   keyValueRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: Spacing.xs,
+    alignItems: 'center',
+    paddingVertical: 3,
+    marginBottom: 2,
   },
-  keyText: { fontSize: Typography.sizes.xs, fontWeight: '600' },
+  keyText: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '600',
+  },
   valText: {
     fontSize: Typography.sizes.xs,
     fontWeight: '700',
-    flex: 1,
     textAlign: 'right',
     marginLeft: Spacing.sm,
   },
+
+  // Full-Width Address Area
+  addressBlock: {
+    borderTopWidth: 1,
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+  },
+  addressLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  addressLabel: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  addressVal: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+
   testItemRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: Spacing.xs,
     borderBottomWidth: 1,
   },
   testName: { fontSize: Typography.sizes.xs, fontWeight: '700' },
   testPrep: { fontSize: Typography.sizes.xs - 2, marginTop: 2 },
-  testPrice: { fontSize: Typography.sizes.xs, fontWeight: '700' },
+  testPrice: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '700',
+    textAlign: 'right',
+    marginLeft: Spacing.sm,
+  },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -959,8 +1020,17 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
     paddingTop: Spacing.sm,
   },
-  totalLabel: { fontSize: Typography.sizes.xs, fontWeight: '800', letterSpacing: 1 },
-  totalAmount: { fontSize: Typography.sizes.lg, fontWeight: '900' },
+  totalLabel: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '800',
+    letterSpacing: 1,
+    flex: 1,
+  },
+  totalAmount: {
+    fontSize: Typography.sizes.lg,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
   attachmentTrigger: {
     flexDirection: 'row',
     alignItems: 'center',

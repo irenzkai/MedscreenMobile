@@ -23,6 +23,7 @@ import { Card } from '../../components/common/Card';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { NoticeBox } from '../../components/common/NoticeBox';
+import { ActionModal } from '../../components/common/ActionModal';
 import { DatePickerModal } from '../../components/common/DatePickerModal';
 import { AddressSelector } from '../../components/common/AddressSelector';
 import {
@@ -36,6 +37,7 @@ import {
   validateRequired,
   calculateAge,
 } from '../../utils/validators';
+import { formatPatientName } from '../../utils/formatters';
 import { CONFIG } from '../../constants/config';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
@@ -66,6 +68,7 @@ export const EditDependentScreen: React.FC<Props> = ({ route, navigation }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
   const [isOver18, setIsOver18] = useState(false);
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -108,6 +111,7 @@ export const EditDependentScreen: React.FC<Props> = ({ route, navigation }) => {
         setLoading(false);
       }
     };
+
     loadDependent();
   }, [dependentId]);
 
@@ -117,8 +121,8 @@ export const EditDependentScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
     setErrorBanner(null);
-
     const errs: Record<string, string> = {};
+
     const fnErr = validateName(firstName, 'First Name');
     if (fnErr) errs.firstName = fnErr;
     else if (!firstName.trim()) errs.firstName = 'First Name is required.';
@@ -148,7 +152,6 @@ export const EditDependentScreen: React.FC<Props> = ({ route, navigation }) => {
     if (!barangay.trim()) errs.barangay = 'Barangay is required.';
 
     setFieldErrors(errs);
-
     if (Object.keys(errs).length > 0) {
       showError('Please correct the highlighted omissions below before saving.');
       return;
@@ -168,15 +171,17 @@ export const EditDependentScreen: React.FC<Props> = ({ route, navigation }) => {
         barangay: barangay.trim().toUpperCase(),
         street: street.trim().toUpperCase(),
       });
-
-      Alert.alert('Updated', 'Dependent profile details have been saved.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      setSuccessModalVisible(true);
     } catch (err: any) {
       showError(err?.message || 'Could not update dependent details.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSuccessDismiss = () => {
+    setSuccessModalVisible(false);
+    navigation.goBack();
   };
 
   const promoUrl = `${CONFIG.WEB_BASE_URL}/register?promote=${dependentId}`;
@@ -216,7 +221,6 @@ export const EditDependentScreen: React.FC<Props> = ({ route, navigation }) => {
         scrollEventThrottle={16}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled">
-        
         {errorBanner ? (
           <NoticeBox
             type="danger"
@@ -270,6 +274,7 @@ export const EditDependentScreen: React.FC<Props> = ({ route, navigation }) => {
               />
             </View>
           </View>
+
           {!noMiddleName && (
             <Input
               value={middleName}
@@ -468,6 +473,56 @@ export const EditDependentScreen: React.FC<Props> = ({ route, navigation }) => {
           }
         }}
       />
+
+      {/* UNIFIED MODAL: Dependent Update Success Prompt */}
+      <ActionModal
+        visible={successModalVisible}
+        type="success"
+        icon="checkmark-circle-outline"
+        title="Profile Updated"
+        confirmText="OK"
+        isSingleAction={true}
+        confirmVariant="primary"
+        onClose={handleSuccessDismiss}
+        onConfirm={handleSuccessDismiss}
+        message={
+          <View style={styles.successModalContent}>
+            <Text style={[styles.successModalPrompt, { color: theme.textMain }]}>
+              Dependent profile details have been saved.
+            </Text>
+
+            <View
+              style={[
+                styles.successSummaryCard,
+                {
+                  backgroundColor: theme.surfaceSubtle,
+                  borderColor: theme.borderColor,
+                },
+              ]}>
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Name:</Text>
+                <Text style={[styles.successRowVal, { color: theme.textMain }]} numberOfLines={1}>
+                  {formatPatientName(firstName, middleName, lastName, suffix)}
+                </Text>
+              </View>
+
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Age / Sex:</Text>
+                <Text style={[styles.successRowVal, { color: theme.textMain }]}>
+                  {liveAge !== null ? `${liveAge} YRS OLD` : 'MINOR'} • {sex.toUpperCase()}
+                </Text>
+              </View>
+
+              <View style={styles.successRow}>
+                <Text style={[styles.successRowLabel, { color: theme.textMuted }]}>Status:</Text>
+                <Text style={[styles.successRowVal, { color: theme.brandAccent }]}>
+                  Active Minor Dependent
+                </Text>
+              </View>
+            </View>
+          </View>
+        }
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -523,5 +578,52 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     lineHeight: 18,
     marginBottom: Spacing.md,
+  },
+
+  // Success Modal Styles
+  successModalContent: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  successModalPrompt: {
+    fontSize: Typography.sizes.xs + 1,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  successSummaryCard: {
+    width: '100%',
+    padding: Spacing.sm + 2,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    gap: 6,
+    marginBottom: Spacing.md,
+  },
+  successRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  successRowLabel: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '600',
+  },
+  successRowVal: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '800',
+    flex: 1,
+    textAlign: 'right',
+    marginLeft: 8,
+  },
+  successNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  successNoteText: {
+    fontSize: 10,
+    flex: 1,
+    lineHeight: 14,
   },
 });

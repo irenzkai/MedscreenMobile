@@ -42,7 +42,12 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
 
   if (!occupancyData || !date) {
     return (
-      <View style={[styles.centerContainer, styles.dashedBox, { borderColor: theme.borderColor }]}>
+      <View
+        style={[
+          styles.centerContainer,
+          styles.dashedBox,
+          { borderColor: theme.borderColor },
+        ]}>
         <Ionicons name="calendar-outline" size={32} color={theme.textMuted} />
         <Text style={[styles.statusText, { color: theme.textMuted }]}>
           Please select a visit date above to view available time blocks.
@@ -51,10 +56,15 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
     );
   }
 
-  // Clinic Closed State
+  // Clinic Closed State (Sundays / Holidays)
   if (occupancyData.is_closed) {
     return (
-      <View style={[styles.centerContainer, styles.dashedBox, { borderColor: theme.danger }]}>
+      <View
+        style={[
+          styles.centerContainer,
+          styles.dashedBox,
+          { borderColor: theme.danger },
+        ]}>
         <Ionicons name="close-circle-outline" size={36} color={theme.danger} />
         <Text style={[styles.statusTitle, { color: theme.danger }]}>Clinic Closed</Text>
         <Text style={[styles.statusText, { color: theme.textMuted }]}>
@@ -67,7 +77,12 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
   const config = occupancyData.config;
   if (!config) {
     return (
-      <View style={[styles.centerContainer, styles.dashedBox, { borderColor: theme.warning }]}>
+      <View
+        style={[
+          styles.centerContainer,
+          styles.dashedBox,
+          { borderColor: theme.warning },
+        ]}>
         <Ionicons name="alert-circle-outline" size={32} color={theme.warning} />
         <Text style={[styles.statusText, { color: theme.textMuted }]}>
           No clinic hours configured for this date.
@@ -77,13 +92,19 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
   }
 
   // Generate Slots matching Laravel 8:00 AM - 5:00 PM rules
-  const slots: Array<{ timeStr: string; display: string; disabled: boolean; reason?: string }> = [];
+  const slots: Array<{
+    timeStr: string;
+    display: string;
+    disabled: boolean;
+    reason?: string;
+  }> = [];
+
   const start = new Date(`2000-01-01T${config.opening_time || '08:00:00'}`);
   const end = new Date(`2000-01-01T${config.closing_time || '17:00:00'}`);
   const now = new Date();
   const todayLocal = now.toISOString().split('T')[0];
-
   const current = new Date(start);
+
   while (current < end) {
     const hours = current.getHours().toString().padStart(2, '0');
     const minutes = current.getMinutes().toString().padStart(2, '0');
@@ -121,31 +142,49 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
     current.setMinutes(current.getMinutes() + (config.slot_duration || 60));
   }
 
+  // Filter out full or passed time blocks
+  const availableSlots = slots.filter((slot) => !slot.disabled);
+
+  // If no slots are open on this date, show "No Slots Available" (matching Clinic Closed style)
+  if (slots.length === 0 || availableSlots.length === 0) {
+    return (
+      <View
+        style={[
+          styles.centerContainer,
+          styles.dashedBox,
+          { borderColor: theme.warning },
+        ]}>
+        <Ionicons name="alert-circle-outline" size={36} color={theme.warning} />
+        <Text style={[styles.statusTitle, { color: theme.warning }]}>
+          No Slots Available
+        </Text>
+        <Text style={[styles.statusText, { color: theme.textMuted }]}>
+          All appointment blocks for this date are fully booked or have already passed. Please pick another date above.
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.gridContainer}>
       <Text style={[styles.sectionTitle, { color: theme.textMain }]}>
         Available Time Blocks (1-Hour Slots)
       </Text>
       <View style={styles.grid}>
-        {slots.map((slot) => {
+        {availableSlots.map((slot) => {
           const isSelected = selectedSlot === slot.timeStr;
           return (
             <TouchableOpacity
               key={slot.timeStr}
-              disabled={slot.disabled}
               onPress={() => onSelectSlot(slot.timeStr, slot.display)}
               style={[
                 styles.slotButton,
                 {
                   backgroundColor: isSelected
                     ? theme.brandAccent
-                    : slot.disabled
-                    ? theme.surfaceSubtle
                     : theme.bgCard,
                   borderColor: isSelected
                     ? theme.brandAccent
-                    : slot.disabled
-                    ? 'transparent'
                     : theme.borderColor,
                 },
               ]}>
@@ -153,25 +192,12 @@ export const TimeSlotPicker: React.FC<TimeSlotPickerProps> = ({
                 style={[
                   styles.slotText,
                   {
-                    color: isSelected
-                      ? '#1C232D'
-                      : slot.disabled
-                      ? theme.textMuted
-                      : theme.textMain,
+                    color: isSelected ? '#1C232D' : theme.textMain,
                     fontWeight: isSelected ? '800' : '600',
                   },
                 ]}>
                 {slot.display}
               </Text>
-              {slot.reason && (
-                <Text
-                  style={[
-                    styles.slotSub,
-                    { color: slot.reason === 'Full' ? theme.danger : theme.textMuted },
-                  ]}>
-                  {slot.reason}
-                </Text>
-              )}
             </TouchableOpacity>
           );
         })}
@@ -222,7 +248,7 @@ const styles = StyleSheet.create({
   },
   slotButton: {
     width: '31%',
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: BorderRadius.md,
     borderWidth: 1.5,
     alignItems: 'center',
@@ -231,11 +257,5 @@ const styles = StyleSheet.create({
   slotText: {
     fontSize: Typography.sizes.xs,
     letterSpacing: 0.25,
-  },
-  slotSub: {
-    fontSize: 9,
-    fontWeight: '800',
-    marginTop: 2,
-    textTransform: 'uppercase',
   },
 });
