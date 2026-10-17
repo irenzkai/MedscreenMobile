@@ -21,18 +21,27 @@ import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { Input } from '../../components/common/Input';
 import { NoticeBox } from '../../components/common/NoticeBox';
-import { validateEmail } from '../../utils/validators';
+import { validateEmail, validatePhone } from '../../utils/validators';
+import { formatToStandardPhone } from '../../utils/formatters';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 import { User } from '../../types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'VerifyAccount'>;
-
 type VerificationTab = 'link' | 'email_otp' | 'sms_otp';
 
 export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { user, sendOtp, changeUnverifiedEmail, logout, setUser, refreshUserProfile } = useAuth();
+  const {
+    user,
+    sendOtp,
+    sendSmsOtp,
+    changeUnverifiedEmail,
+    changeUnverifiedPhone,
+    logout,
+    setUser,
+    refreshUserProfile,
+  } = useAuth();
   const scrollViewRef = useRef<ScrollView | null>(null);
 
   const targetEmail = route.params?.email || user?.email || '';
@@ -50,6 +59,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
   const [resendingEmailOtp, setResendingEmailOtp] = useState(false);
   const [resendingSmsOtp, setResendingSmsOtp] = useState(false);
   const [changingEmail, setChangingEmail] = useState(false);
+  const [changingPhone, setChangingPhone] = useState(false);
 
   // Independent 30s cooldowns per channel
   const [linkCooldown, setLinkCooldown] = useState<number>(0);
@@ -64,6 +74,11 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
   const [showChangeEmail, setShowChangeEmail] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newEmailError, setNewEmailError] = useState<string | null>(null);
+
+  // Change Phone accordion
+  const [showChangePhone, setShowChangePhone] = useState(false);
+  const [newPhoneDisplay, setNewPhoneDisplay] = useState('');
+  const [newPhoneError, setNewPhoneError] = useState<string | null>(null);
 
   // Input refs for automatic focus progression
   const emailInputRefs = useRef<Array<TextInput | null>>([]);
@@ -105,10 +120,14 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
     const refs = isEmail ? emailInputRefs : smsInputRefs;
 
     digits[index] = clean.slice(-1);
-    if (isEmail) setEmailOtpDigits(digits);
-    else setSmsOtpDigits(digits);
+    if (isEmail) {
+      setEmailOtpDigits(digits);
+    } else {
+      setSmsOtpDigits(digits);
+    }
 
     if (errorMsg) setErrorMsg(null);
+
     if (clean && index < 5) {
       refs.current[index + 1]?.focus();
     }
@@ -134,7 +153,9 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
       showSuccess(`A fresh verification link has been successfully dispatched to ${targetEmail}.`);
       setLinkCooldown(30);
     } catch (err: any) {
-      showError(extractErrorMessage(err) || 'Unable to send verification link. Please use an OTP code.');
+      showError(
+        extractErrorMessage(err) || 'Unable to send verification link. Please use an OTP code.'
+      );
     } finally {
       setSendingLink(false);
     }
@@ -174,7 +195,10 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
         phone: userPhone,
         channel: 'sms',
       });
-      showSuccess(res.data?.message || 'A secure 6-digit SMS verification code has been dispatched to your mobile phone.');
+      showSuccess(
+        res.data?.message ||
+          'A secure 6-digit SMS verification code has been dispatched to your mobile phone.'
+      );
       setSmsCooldown(30);
     } catch (err: any) {
       showError(extractErrorMessage(err) || 'Failed to dispatch SMS verification code.');
@@ -187,6 +211,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
   const handleVerifyOtp = async (channel: 'email' | 'sms') => {
     const digits = channel === 'email' ? emailOtpDigits : smsOtpDigits;
     const fullOtp = digits.join('');
+
     if (fullOtp.length !== 6) {
       showError('Please enter all 6 digits of the verification code.');
       return;
@@ -203,12 +228,14 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
       if (res.data?.success) {
         showSuccess(res.data.message || 'Account successfully verified!');
         if (user) {
-          const updatedUser: User = {
+          const verifiedUser: User = {
             ...user,
-            email_verified_at: channel === 'email' ? new Date().toISOString() : user.email_verified_at,
-            phone_verified_at: channel === 'sms' ? new Date().toISOString() : user.phone_verified_at,
+            email_verified_at:
+              channel === 'email' ? new Date().toISOString() : user.email_verified_at,
+            phone_verified_at:
+              channel === 'sms' ? new Date().toISOString() : user.phone_verified_at,
           };
-          setUser(updatedUser);
+          setUser(verifiedUser);
         }
         await refreshUserProfile();
       } else {
@@ -230,20 +257,52 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
       showError(emailErr);
       return;
     }
+
     setChangingEmail(true);
     const res = await changeUnverifiedEmail(newEmail);
     setChangingEmail(false);
+
     if (res.success) {
       setShowChangeEmail(false);
       setNewEmail('');
       setEmailCooldown(30);
-      showSuccess('Your registered email was updated and a new verification code was dispatched.');
+      showSuccess(
+        'Your registered email was updated and a new verification code was dispatched.'
+      );
     } else {
       showError(res.message || 'Could not update email address.');
     }
   };
 
-  // 6. Logout / Cancel & Exit
+  // 6. Update Mobile Phone Number
+  const handleUpdatePhone = async () => {
+    setNewPhoneError(null);
+    const standardPhone = formatToStandardPhone(newPhoneDisplay);
+    const phoneErr = validatePhone(standardPhone);
+    if (phoneErr) {
+      setNewPhoneError(phoneErr);
+      showError(phoneErr);
+      return;
+    }
+
+    setChangingPhone(true);
+    const res = await changeUnverifiedPhone(standardPhone);
+    setChangingPhone(false);
+
+    if (res.success) {
+      setShowChangePhone(false);
+      setNewPhoneDisplay('');
+      setSmsCooldown(30);
+      setSmsOtpDigits(['', '', '', '', '', '']);
+      showSuccess(
+        'Your registered phone number was updated and a new SMS verification code was dispatched.'
+      );
+    } else {
+      showError(res.message || 'Could not update phone number.');
+    }
+  };
+
+  // 7. Logout / Cancel & Exit
   const handleCancelAndExit = () => {
     Alert.alert(
       'Sign Out',
@@ -306,7 +365,6 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
           <View style={[styles.iconCircle, { backgroundColor: theme.surfaceSubtle }]}>
             <Ionicons name={headerMeta.icon} size={30} color={theme.brandAccent} />
           </View>
-
           <Text style={[styles.title, { color: theme.textMain }]}>{headerMeta.title}</Text>
           <Text style={[styles.subtitle, { color: theme.textMuted }]}>{headerMeta.subtitle}</Text>
 
@@ -419,7 +477,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
 
           {/* =========================================================================
               TAB 1: EMAIL VERIFICATION LINK
-              ========================================================================= */}
+             ========================================================================= */}
           {activeTab === 'link' && (
             <View>
               <View
@@ -439,13 +497,13 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   </Text>
                 </View>
               </View>
-
               <Text style={[styles.methodDesc, { color: theme.textMuted }]}>
                 We will dispatch a secure, cryptographic one-click activation URL to your email inbox. Simply tap the link to unlock your patient portal.
               </Text>
-
               <Button
-                title={linkCooldown > 0 ? `Resend Link in ${linkCooldown}s` : 'Send Activation Email Link'}
+                title={
+                  linkCooldown > 0 ? `Resend Link in ${linkCooldown}s` : 'Send Activation Email Link'
+                }
                 onPress={handleSendEmailLink}
                 loading={sendingLink}
                 disabled={linkCooldown > 0}
@@ -457,18 +515,19 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
 
           {/* =========================================================================
               TAB 2: EMAIL VERIFICATION CODE (6-DIGIT OTP)
-              ========================================================================= */}
+             ========================================================================= */}
           {activeTab === 'email_otp' && (
             <View>
               <View style={styles.channelHeader}>
                 <Text style={[styles.channelLabel, { color: theme.textMuted }]}>
                   Enter 6-Digit Email Code
                 </Text>
-                <Text style={[styles.channelTarget, { color: theme.brandAccent }]} numberOfLines={1}>
+                <Text
+                  style={[styles.channelTarget, { color: theme.brandAccent }]}
+                  numberOfLines={1}>
                   {targetEmail}
                 </Text>
               </View>
-
               <View style={styles.otpRow}>
                 {emailOtpDigits.map((digit, idx) => (
                   <TextInput
@@ -496,7 +555,6 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   />
                 ))}
               </View>
-
               <Button
                 title="Submit Verification Code"
                 onPress={() => handleVerifyOtp('email')}
@@ -504,7 +562,6 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                 size="lg"
                 style={{ marginTop: Spacing.xs }}
               />
-
               <View style={styles.resendRow}>
                 <Text style={[styles.resendText, { color: theme.textMuted }]}>
                   Didn't receive the email code?{' '}
@@ -524,20 +581,63 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
             </View>
           )}
 
+          {/* Change Email Trigger & Form (Visible for Email Channels) */}
+          {(activeTab === 'link' || activeTab === 'email_otp') && (
+            <>
+              <TouchableOpacity
+                onPress={() => setShowChangeEmail((prev) => !prev)}
+                style={styles.changeEmailTrigger}>
+                <Ionicons
+                  name="create-outline"
+                  size={15}
+                  color={theme.brandAccent}
+                  style={{ marginRight: 4 }}
+                />
+                <Text style={[styles.changeEmailText, { color: theme.brandAccent }]}>
+                  {showChangeEmail ? 'Cancel Email Edit' : 'Entered wrong email? Change it'}
+                </Text>
+              </TouchableOpacity>
+              {showChangeEmail && (
+                <View style={[styles.changeEmailBox, { borderColor: theme.borderColor }]}>
+                  <Input
+                    label="Correct Email Address"
+                    value={newEmail}
+                    onChangeText={(t) => {
+                      setNewEmail(t);
+                      if (newEmailError) setNewEmailError(null);
+                    }}
+                    error={newEmailError}
+                    placeholder="new.email@example.com"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                  <Button
+                    title="Update Email & Send Code"
+                    variant="outline"
+                    size="sm"
+                    onPress={handleUpdateEmail}
+                    loading={changingEmail}
+                  />
+                </View>
+              )}
+            </>
+          )}
+
           {/* =========================================================================
               TAB 3: MOBILE PHONE SMS OTP (6-DIGIT OTP)
-              ========================================================================= */}
+             ========================================================================= */}
           {activeTab === 'sms_otp' && (
             <View>
               <View style={styles.channelHeader}>
                 <Text style={[styles.channelLabel, { color: theme.textMuted }]}>
                   Enter 6-Digit SMS Code
                 </Text>
-                <Text style={[styles.channelTarget, { color: theme.brandAccent }]} numberOfLines={1}>
+                <Text
+                  style={[styles.channelTarget, { color: theme.brandAccent }]}
+                  numberOfLines={1}>
                   {userPhone || 'No phone registered'}
                 </Text>
               </View>
-
               <View style={styles.otpRow}>
                 {smsOtpDigits.map((digit, idx) => (
                   <TextInput
@@ -565,7 +665,6 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   />
                 ))}
               </View>
-
               <Button
                 title="Verify SMS Code"
                 onPress={() => handleVerifyOtp('sms')}
@@ -573,7 +672,6 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                 size="lg"
                 style={{ marginTop: Spacing.xs }}
               />
-
               <View style={styles.resendRow}>
                 <Text style={[styles.resendText, { color: theme.textMuted }]}>
                   Didn't receive the SMS code?{' '}
@@ -590,45 +688,46 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   </Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          )}
 
-          {/* Change Email Trigger & Form */}
-          <TouchableOpacity
-            onPress={() => setShowChangeEmail((prev) => !prev)}
-            style={styles.changeEmailTrigger}>
-            <Ionicons
-              name="create-outline"
-              size={15}
-              color={theme.brandAccent}
-              style={{ marginRight: 4 }}
-            />
-            <Text style={[styles.changeEmailText, { color: theme.brandAccent }]}>
-              {showChangeEmail ? 'Cancel Email Edit' : 'Entered wrong email? Change it'}
-            </Text>
-          </TouchableOpacity>
-
-          {showChangeEmail && (
-            <View style={[styles.changeEmailBox, { borderColor: theme.borderColor }]}>
-              <Input
-                label="Correct Email Address"
-                value={newEmail}
-                onChangeText={(t) => {
-                  setNewEmail(t);
-                  if (newEmailError) setNewEmailError(null);
-                }}
-                error={newEmailError}
-                placeholder="new.email@example.com"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <Button
-                title="Update Email & Send Code"
-                variant="outline"
-                size="sm"
-                onPress={handleUpdateEmail}
-                loading={changingEmail}
-              />
+              {/* Change Mobile Phone Number in SMS OTP Area */}
+              <TouchableOpacity
+                onPress={() => setShowChangePhone((prev) => !prev)}
+                style={styles.changePhoneTrigger}>
+                <Ionicons
+                  name="create-outline"
+                  size={15}
+                  color={theme.brandAccent}
+                  style={{ marginRight: 4 }}
+                />
+                <Text style={[styles.changePhoneText, { color: theme.brandAccent }]}>
+                  {showChangePhone ? 'Cancel Phone Edit' : 'Entered wrong phone number? Change it'}
+                </Text>
+              </TouchableOpacity>
+              {showChangePhone && (
+                <View style={[styles.changePhoneBox, { borderColor: theme.borderColor }]}>
+                  <Input
+                    label="Correct Mobile Phone"
+                    prefixText="09"
+                    value={newPhoneDisplay}
+                    onChangeText={(txt) => {
+                      const digits = txt.replace(/[^0-9]/g, '').slice(0, 9);
+                      setNewPhoneDisplay(digits);
+                      if (newPhoneError) setNewPhoneError(null);
+                    }}
+                    placeholder="171234567"
+                    keyboardType="number-pad"
+                    helperText="Enter 9 digits after 09."
+                    error={newPhoneError}
+                  />
+                  <Button
+                    title="Update Phone & Send SMS Code"
+                    variant="outline"
+                    size="sm"
+                    onPress={handleUpdatePhone}
+                    loading={changingPhone}
+                  />
+                </View>
+              )}
             </View>
           )}
 
@@ -773,6 +872,18 @@ const styles = StyleSheet.create({
   },
   changeEmailText: { fontSize: Typography.sizes.xs, fontWeight: '700' },
   changeEmailBox: {
+    borderTopWidth: 1,
+    paddingTop: Spacing.md,
+    marginTop: Spacing.md,
+  },
+  changePhoneTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Spacing.md,
+  },
+  changePhoneText: { fontSize: Typography.sizes.xs, fontWeight: '700' },
+  changePhoneBox: {
     borderTopWidth: 1,
     paddingTop: Spacing.md,
     marginTop: Spacing.md,

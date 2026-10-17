@@ -46,7 +46,10 @@ export const authApi = {
 
   // Registration
   register: async (payload: RegisterPayload) => {
-    const response = await apiClient.post<{ token: string; user: User; message?: string }>('/register', payload);
+    const response = await apiClient.post<{ token: string; user: User; message?: string }>(
+      '/register',
+      payload
+    );
     return response.data;
   },
 
@@ -58,26 +61,38 @@ export const authApi = {
 
   // Password Recovery
   forgotPassword: async (payload: ForgotPasswordPayload) => {
-    const response = await apiClient.post<{ message?: string; status?: string }>('/forgot-password', payload);
+    const response = await apiClient.post<{ message?: string; status?: string }>(
+      '/forgot-password',
+      payload
+    );
     return response.data;
   },
 
   resetPassword: async (payload: ResetPasswordPayload) => {
-    const response = await apiClient.post<{ message?: string; status?: string }>('/reset-password', payload);
+    const response = await apiClient.post<{ message?: string; status?: string }>(
+      '/reset-password',
+      payload
+    );
     return response.data;
   },
 
   // Verification & OTP
   sendVerificationOtp: async (email?: string) => {
-    const response = await apiClient.post<{ success: boolean; message?: string }>('/email/verification-otp', { email });
+    const response = await apiClient.post<{ success: boolean; message?: string }>(
+      '/email/verification-otp',
+      { email }
+    );
     return response.data;
   },
 
   verifyEmailOtp: async (otp: string, email?: string) => {
-    const response = await apiClient.post<{ success: boolean; message?: string; email?: string }>('/verify-otp', {
-      otp: otp.trim(),
-      email,
-    });
+    const response = await apiClient.post<{ success: boolean; message?: string; email?: string }>(
+      '/verify-otp',
+      {
+        otp: otp.trim(),
+        email,
+      }
+    );
     return response.data;
   },
 
@@ -88,16 +103,33 @@ export const authApi = {
     return response.data;
   },
 
+  changeUnverifiedPhone: async (phone: string) => {
+    const response = await apiClient.post<{
+      success: boolean;
+      message?: string;
+      user?: User;
+      phone?: string;
+    }>('/phone/change', {
+      phone: phone.trim(),
+    });
+    return response.data;
+  },
+
   // Account Reactivation
   sendReactivationOtp: async () => {
-    const response = await apiClient.post<{ success: boolean; message?: string }>('/reactivate/resend-otp');
+    const response = await apiClient.post<{ success: boolean; message?: string }>(
+      '/reactivate/resend-otp'
+    );
     return response.data;
   },
 
   verifyReactivationOtp: async (otp: string) => {
-    const response = await apiClient.post<{ token: string; user: User; message?: string }>('/reactivate/verify-otp', {
-      otp: otp.trim(),
-    });
+    const response = await apiClient.post<{ token: string; user: User; message?: string }>(
+      '/reactivate/verify-otp',
+      {
+        otp: otp.trim(),
+      }
+    );
     return response.data;
   },
 
@@ -108,19 +140,28 @@ export const authApi = {
   },
 
   updateProfile: async (payload: UpdateProfilePayload) => {
-    const response = await apiClient.patch<{ success: boolean; user: User; message?: string }>('/profile', payload);
+    const response = await apiClient.patch<{ success: boolean; user: User; message?: string }>(
+      '/profile',
+      payload
+    );
     return response.data;
   },
 
   updatePassword: async (payload: UpdatePasswordPayload) => {
-    const response = await apiClient.put<{ success: boolean; message?: string }>('/profile/password', payload);
+    const response = await apiClient.put<{ success: boolean; message?: string }>(
+      '/profile/password',
+      payload
+    );
     return response.data;
   },
 
   deleteAccount: async (password: string) => {
-    const response = await apiClient.delete<{ success: boolean; redirect?: string }>('/profile', {
-      data: { password },
-    });
+    const response = await apiClient.delete<{ success: boolean; redirect?: string }>(
+      '/profile',
+      {
+        data: { password },
+      }
+    );
     return response.data;
   },
 };

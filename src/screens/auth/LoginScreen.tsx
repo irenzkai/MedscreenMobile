@@ -20,7 +20,7 @@ import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { NoticeBox } from '../../components/common/NoticeBox';
 import { ActionModal } from '../../components/common/ActionModal';
-import { validateEmail, validateRequired } from '../../utils/validators';
+import { validateLoginIdentifier, validateRequired } from '../../utils/validators';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
@@ -31,11 +31,11 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const { login } = useAuth();
   const scrollViewRef = useRef<ScrollView | null>(null);
 
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{ identifier?: string; password?: string }>({});
 
   // Deactivated Account Modal States
   const [deactivatedModalVisible, setDeactivatedModalVisible] = useState(false);
@@ -50,12 +50,12 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleLogin = async () => {
     setErrorMessage(null);
-    const emailErr = validateEmail(email);
+    const idErr = validateLoginIdentifier(identifier);
     const passErr = validateRequired(password, 'Password');
 
-    if (emailErr || passErr) {
+    if (idErr || passErr) {
       setErrors({
-        email: emailErr || undefined,
+        identifier: idErr || undefined,
         password: passErr || undefined,
       });
       showError('Please check the highlighted credentials below.');
@@ -66,8 +66,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
     setLoading(true);
 
     try {
-      const res = await login(email, password);
-
+      const res = await login(identifier, password);
       if (!res.success) {
         if (res.deactivated) {
           setDeactivatedMessage(
@@ -76,11 +75,13 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
           );
           setDeactivatedModalVisible(true);
         } else {
-          showError(res.message || 'Invalid email or password.');
+          showError(res.message || 'Invalid email/phone or password.');
         }
       } else if (res.unverified) {
-        // Direct unverified user to account verification
-        navigation.navigate('VerifyAccount', { email: email.trim() });
+        // Direct unverified user to account verification with their email if available
+        navigation.navigate('VerifyAccount', {
+          email: identifier.includes('@') ? identifier.trim() : res.user?.email || undefined,
+        });
       }
     } catch (err: any) {
       showError(err?.message || 'Login failed. Please try again.');
@@ -124,7 +125,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
         <Card style={styles.formCard}>
           <Text style={[styles.formTitle, { color: theme.textMain }]}>Login Account</Text>
           <Text style={[styles.formSub, { color: theme.textMuted }]}>
-            Sign in with your registered patient account credentials.
+            Sign in with your registered email address or mobile phone number.
           </Text>
 
           {errorMessage ? (
@@ -137,16 +138,17 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
           ) : null}
 
           <Input
-            label="Email Address"
-            value={email}
+            label="Email or Mobile Phone"
+            value={identifier}
             onChangeText={(text) => {
-              setEmail(text);
-              if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
+              setIdentifier(text);
+              if (errors.identifier) setErrors((prev) => ({ ...prev, identifier: undefined }));
             }}
-            placeholder="name@example.com"
+            placeholder="name@example.com or 09XXXXXXXXX"
             autoCapitalize="none"
-            keyboardType="email-address"
-            error={errors.email}
+            autoCorrect={false}
+            keyboardType="default"
+            error={errors.identifier}
             isRequired
           />
 
@@ -287,7 +289,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
-
   // Deactivated Modal Styles
   deactivatedModalContent: {
     width: '100%',

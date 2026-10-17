@@ -10,6 +10,7 @@ import {
   setStoredToken,
   USER_STORAGE_KEY,
 } from '../services/api/client';
+import { formatToStandardPhone } from '../utils/formatters';
 
 export interface RegisterPayload {
   first_name: string;
@@ -35,6 +36,7 @@ export interface AuthResponse {
   message?: string;
   deactivated?: boolean;
   unverified?: boolean;
+  user?: User;
 }
 
 export interface PendingPromotionData {
@@ -61,7 +63,7 @@ interface AuthContextType {
   isEmailVerified: boolean;
   pendingPromotionData: PendingPromotionData | null;
   clearPendingPromotion: () => void;
-  login: (email: string, password: string) => Promise<AuthResponse>;
+  login: (emailOrPhone: string, password: string) => Promise<AuthResponse>;
   register: (payload: RegisterPayload) => Promise<AuthResponse>;
   logout: () => Promise<void>;
   logoutAndRegister: (dependent: Dependent, parentUser?: User | null) => Promise<void>;
@@ -69,6 +71,7 @@ interface AuthContextType {
   sendSmsOtp: (phone?: string) => Promise<AuthResponse>;
   verifyOtp: (otp: string, email?: string, channel?: 'email' | 'sms') => Promise<AuthResponse>;
   changeUnverifiedEmail: (newEmail: string) => Promise<AuthResponse>;
+  changeUnverifiedPhone: (newPhone: string) => Promise<AuthResponse>;
   sendReactivationOtp: () => Promise<AuthResponse>;
   verifyReactivationOtp: (
     otp: string,
@@ -124,10 +127,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setPendingPromotionData(null);
   };
 
-  const login = async (email: string, password: string): Promise<AuthResponse> => {
+  const login = async (emailOrPhone: string, password: string): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/login', {
-        email: email.trim(),
+        email: emailOrPhone.trim(),
         password,
       });
 
@@ -146,6 +149,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return {
           success: true,
           unverified: isUnverified,
+          user: receivedUser,
         };
       }
 
@@ -184,7 +188,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await persistUser(receivedUser);
         setToken(receivedToken);
         clearPendingPromotion();
-        return { success: true, unverified: true };
+        return { success: true, unverified: true, user: receivedUser };
       }
 
       clearPendingPromotion();
@@ -282,7 +286,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const response = await apiClient.post('/email/change', {
         email: newEmail.trim().toLowerCase(),
       });
-
       if (user) {
         const updatedUser: User = {
           ...user,
@@ -291,10 +294,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
         await persistUser(updatedUser);
       }
-
       return {
         success: true,
         message: response.data?.message || 'Email updated. A new code has been dispatched.',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: extractErrorMessage(error),
+      };
+    }
+  };
+
+  const changeUnverifiedPhone = async (newPhone: string): Promise<AuthResponse> => {
+    try {
+      const standardPhone = formatToStandardPhone(newPhone);
+      const response = await apiClient.post('/phone/change', {
+        phone: standardPhone,
+      });
+      if (user) {
+        const updatedUser: User = {
+          ...user,
+          phone: response.data?.phone || standardPhone,
+          phone_verified_at: null,
+        };
+        await persistUser(updatedUser);
+      }
+      return {
+        success: true,
+        message:
+          response.data?.message ||
+          'Mobile number updated. A new SMS verification code has been dispatched.',
       };
     } catch (error) {
       return {
@@ -327,7 +357,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const response = await apiClient.post('/reactivate/verify-otp', {
         otp: otp.trim(),
       });
-
       const { token: receivedToken, user: receivedUser } = response.data;
 
       if (autoCommit && receivedToken && receivedUser) {
@@ -399,6 +428,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         street: dep.street || parentUser?.street || '',
       },
     };
+
     setPendingPromotionData(promotionPayload);
     await logout();
   };
@@ -424,6 +454,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         sendSmsOtp,
         verifyOtp,
         changeUnverifiedEmail,
+        changeUnverifiedPhone,
         sendReactivationOtp,
         verifyReactivationOtp,
         completeReactivation,

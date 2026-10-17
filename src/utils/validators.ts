@@ -14,7 +14,6 @@
  */
 export function validateName(value: string, fieldName = 'Name'): string | null {
   const val = value ? value.trim() : '';
-
   if (!val || val === 'N/A' || val.toUpperCase() === 'N/A') {
     return null;
   }
@@ -135,7 +134,6 @@ export function validateBirthdate(birthdateStr: string, isDependent = false): st
  */
 export function validatePhone(phone: string): string | null {
   const val = phone ? phone.trim() : '';
-
   if (!val) {
     return 'Contact phone number is required.';
   }
@@ -153,7 +151,6 @@ export function validatePhone(phone: string): string | null {
  */
 export function validateEmail(email: string): string | null {
   const val = email ? email.trim() : '';
-
   if (!val) {
     return 'Email address is required.';
   }
@@ -161,6 +158,33 @@ export function validateEmail(email: string): string | null {
   const emailRegex = /^[^@\s]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
   if (!emailRegex.test(val)) {
     return 'Please enter a valid email address with a domain (e.g., name@domain.com).';
+  }
+
+  return null;
+}
+
+/**
+ * Validates login credential identifier (Email address or Philippine mobile number).
+ * Supports:
+ * - Email format: user@domain.com
+ * - Philippine Mobile Number formats: 09XXXXXXXXX, +639XXXXXXXXX, 639XXXXXXXXX, 9XXXXXXXXX
+ */
+export function validateLoginIdentifier(value: string): string | null {
+  const val = value ? value.trim() : '';
+  if (!val) {
+    return 'Please enter your registered email address or mobile phone number.';
+  }
+
+  // If input contains '@', validate strictly as email
+  if (val.includes('@')) {
+    return validateEmail(val);
+  }
+
+  // Otherwise, validate as a Philippine mobile phone number
+  const clean = val.replace(/[\s\-\(\)]/g, '');
+  const phoneRegex = /^(\+?639\d{9}|639\d{9}|09\d{9}|9\d{9})$/;
+  if (!phoneRegex.test(clean)) {
+    return 'Please enter a valid email address or 11-digit mobile phone number (09XXXXXXXXX).';
   }
 
   return null;
@@ -220,5 +244,6 @@ export function validateRequired(value: string | undefined | null, fieldName: st
   if (!value || !value.trim()) {
     return `${fieldName} is required.`;
   }
+
   return null;
 }
