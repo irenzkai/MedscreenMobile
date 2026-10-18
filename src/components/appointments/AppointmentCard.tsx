@@ -42,8 +42,8 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
   // Dynamically compute expiration matching the 24-hour server policy
   const isExpired = isAppointmentExpired(appointment);
   const effectiveStatus = getEffectiveAppointmentStatus(appointment);
-  const isBulk = !appointment.batch_id;
-  const isDependent = !appointment.dependent_id;
+  const isBulk = Boolean(appointment.batch_id);
+  const isDependent = Boolean(appointment.dependent_id);
   const categoryLabel = isBulk ? 'BULK' : isDependent ? 'DEPENDENT' : 'PERSONAL';
 
   const canResubmit =
@@ -52,8 +52,9 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
       effectiveStatus === 'expired') &&
     appointment.status !== 'released';
 
+  // Approved appointments CANNOT be canceled; strictly pending or returned only
   const canCancel =
-    ['pending', 'approved', 'returned'].includes(effectiveStatus) && !isExpired;
+    ['pending', 'returned'].includes(effectiveStatus) && !isExpired;
 
   // Expired appointments can be deleted as long as payment is not actively paid (unpaid or refunded can be purged)
   const canDeleteExpired =
@@ -224,7 +225,7 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
         </View>
       )}
 
-      {/* Action Toolbar (NO Download on card) */}
+      {/* Action Toolbar */}
       {(canResubmit || canCancel || canDeleteExpired || hasReleasedResults) && (
         <View style={styles.actionsRow}>
           {hasReleasedResults && onViewResult && (

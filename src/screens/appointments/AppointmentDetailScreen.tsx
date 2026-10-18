@@ -143,8 +143,8 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
   const isExpired = isAppointmentExpired(appointment);
   const effectiveStatus = getEffectiveAppointmentStatus(appointment);
   const displayAge = calculatePatientAge(appointment);
-  const isBulk = !appointment.batch_id;
-  const isDependent = !appointment.dependent_id;
+  const isBulk = Boolean(appointment.batch_id);
+  const isDependent = Boolean(appointment.dependent_id);
   const categoryLabel = isBulk ? 'BULK' : isDependent ? 'DEPENDENT' : 'PERSONAL';
 
   const canResubmit =
@@ -153,8 +153,9 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
       effectiveStatus === 'expired') &&
     appointment.status !== 'released';
 
+  // Approved appointments CANNOT be canceled; strictly pending or returned only
   const canCancel =
-    ['pending', 'approved', 'returned'].includes(effectiveStatus) && !isExpired;
+    ['pending', 'returned'].includes(effectiveStatus) && !isExpired;
 
   // Timezone-safe 24-Hour Policy Calculation
   const { isWithin24Hours, scheduledFormatted } = getCancellationPolicyDetails(appointment);
@@ -165,7 +166,6 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
   if (effectiveStatus === 'released') {
     const included = appointment.result?.included_reports || [];
     const serviceNames = (appointment.services || []).map((s) => s.name.toUpperCase());
-
     const hasExplicitIncluded = Array.isArray(included) && included.length > 0;
 
     // Service matching helpers matching Laravel ResultController
@@ -344,6 +344,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
             <Badge status={effectiveStatus} isExpired={isExpired} size="md" />
           </View>
 
+          {/* Returned Notice */}
           {effectiveStatus === 'returned' && appointment.return_reason && (
             <View
               style={[
@@ -360,6 +361,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
             </View>
           )}
 
+          {/* Retest Notice */}
           {effectiveStatus === 'retest' && (
             <View
               style={[
@@ -657,6 +659,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                 onPress={() => setForwardConfirmVisible(true)}
               />
             </View>
+
             <View style={styles.reportsList}>
               {availableReports.map((report) => (
                 <View
@@ -740,6 +743,7 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
               style={{ marginBottom: Spacing.sm }}
             />
           )}
+
           {canCancel && (
             <Button
               title="Cancel Appointment"
@@ -973,7 +977,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginLeft: Spacing.sm,
   },
-
   // Full-Width Address Area
   addressBlock: {
     borderTopWidth: 1,
@@ -997,7 +1000,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 18,
   },
-
   testItemRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
