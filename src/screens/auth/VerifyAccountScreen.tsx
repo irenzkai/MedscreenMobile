@@ -42,8 +42,8 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
     setUser,
     refreshUserProfile,
   } = useAuth();
-  const scrollViewRef = useRef<ScrollView | null>(null);
 
+  const scrollViewRef = useRef<ScrollView | null>(null);
   const targetEmail = route.params?.email || user?.email || '';
   const userPhone = user?.phone || '';
 
@@ -127,7 +127,6 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
     }
 
     if (errorMsg) setErrorMsg(null);
-
     if (clean && index < 5) {
       refs.current[index + 1]?.focus();
     }
@@ -451,6 +450,10 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
               onPress={() => {
                 setActiveTab('sms_otp');
                 setErrorMsg(null);
+                // Automatically dispatch SMS code if not in cooldown
+                if (smsCooldown === 0 && userPhone) {
+                  handleResendSmsOtp();
+                }
               }}
               style={[
                 styles.tabPill,
@@ -477,7 +480,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
 
           {/* =========================================================================
               TAB 1: EMAIL VERIFICATION LINK
-             ========================================================================= */}
+              ========================================================================= */}
           {activeTab === 'link' && (
             <View>
               <View
@@ -497,9 +500,11 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   </Text>
                 </View>
               </View>
+
               <Text style={[styles.methodDesc, { color: theme.textMuted }]}>
                 We will dispatch a secure, cryptographic one-click activation URL to your email inbox. Simply tap the link to unlock your patient portal.
               </Text>
+
               <Button
                 title={
                   linkCooldown > 0 ? `Resend Link in ${linkCooldown}s` : 'Send Activation Email Link'
@@ -515,7 +520,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
 
           {/* =========================================================================
               TAB 2: EMAIL VERIFICATION CODE (6-DIGIT OTP)
-             ========================================================================= */}
+              ========================================================================= */}
           {activeTab === 'email_otp' && (
             <View>
               <View style={styles.channelHeader}>
@@ -528,6 +533,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   {targetEmail}
                 </Text>
               </View>
+
               <View style={styles.otpRow}>
                 {emailOtpDigits.map((digit, idx) => (
                   <TextInput
@@ -555,6 +561,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   />
                 ))}
               </View>
+
               <Button
                 title="Submit Verification Code"
                 onPress={() => handleVerifyOtp('email')}
@@ -562,6 +569,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                 size="lg"
                 style={{ marginTop: Spacing.xs }}
               />
+
               <View style={styles.resendRow}>
                 <Text style={[styles.resendText, { color: theme.textMuted }]}>
                   Didn't receive the email code?{' '}
@@ -597,6 +605,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   {showChangeEmail ? 'Cancel Email Edit' : 'Entered wrong email? Change it'}
                 </Text>
               </TouchableOpacity>
+
               {showChangeEmail && (
                 <View style={[styles.changeEmailBox, { borderColor: theme.borderColor }]}>
                   <Input
@@ -625,7 +634,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
 
           {/* =========================================================================
               TAB 3: MOBILE PHONE SMS OTP (6-DIGIT OTP)
-             ========================================================================= */}
+              ========================================================================= */}
           {activeTab === 'sms_otp' && (
             <View>
               <View style={styles.channelHeader}>
@@ -638,6 +647,22 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   {userPhone || 'No phone registered'}
                 </Text>
               </View>
+
+              {/* Dedicated Globe & Master Bypass Notice */}
+              <View
+                style={[
+                  styles.bypassNoticeBox,
+                  {
+                    backgroundColor: 'rgba(25, 211, 140, 0.08)',
+                    borderColor: theme.brandAccent,
+                  },
+                ]}>
+                <Ionicons name="information-circle" size={16} color={theme.brandAccent} style={{ marginRight: 6 }} />
+                <Text style={[styles.bypassNoticeText, { color: theme.textMain }]}>
+                  Only works for <Text style={{ fontWeight: '800', color: theme.brandAccent }}>GLOBE</Text> numbers, to bypass, use code <Text style={{ fontWeight: '800', color: theme.brandAccent }}>888888</Text>.
+                </Text>
+              </View>
+
               <View style={styles.otpRow}>
                 {smsOtpDigits.map((digit, idx) => (
                   <TextInput
@@ -665,6 +690,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   />
                 ))}
               </View>
+
               <Button
                 title="Verify SMS Code"
                 onPress={() => handleVerifyOtp('sms')}
@@ -672,6 +698,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                 size="lg"
                 style={{ marginTop: Spacing.xs }}
               />
+
               <View style={styles.resendRow}>
                 <Text style={[styles.resendText, { color: theme.textMuted }]}>
                   Didn't receive the SMS code?{' '}
@@ -703,6 +730,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                   {showChangePhone ? 'Cancel Phone Edit' : 'Entered wrong phone number? Change it'}
                 </Text>
               </TouchableOpacity>
+
               {showChangePhone && (
                 <View style={[styles.changePhoneBox, { borderColor: theme.borderColor }]}>
                   <Input
@@ -716,7 +744,7 @@ export const VerifyAccountScreen: React.FC<Props> = ({ route }) => {
                     }}
                     placeholder="171234567"
                     keyboardType="number-pad"
-                    helperText="Enter 9 digits after 09."
+                    helperText="Enter 9 digits after 09. Only works for GLOBE numbers, to bypass, use code 888888."
                     error={newPhoneError}
                   />
                   <Button
@@ -825,7 +853,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   channelLabel: {
     fontSize: Typography.sizes.xs - 1,
@@ -836,6 +864,19 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     fontWeight: '700',
     maxWidth: '50%',
+  },
+  bypassNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
+  bypassNoticeText: {
+    fontSize: 11,
+    lineHeight: 16,
+    flex: 1,
   },
   otpRow: {
     flexDirection: 'row',

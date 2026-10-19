@@ -52,7 +52,7 @@ import { User } from '../../types';
 
 export const SettingsScreen: React.FC = () => {
   const theme = useTheme();
-  const { user, refreshUserProfile, logout, setUser, sendOtp, sendSmsOtp, verifyOtp } = useAuth();
+  const { user, refreshUserProfile, logout, setUser, sendOtp, sendSmsOtp } = useAuth();
   const scrollViewRef = useRef<ScrollView | null>(null);
   const { contentOffsetY, contentHeight, layoutHeight, handleScroll } = useScrollShortcut();
 
@@ -332,7 +332,6 @@ export const SettingsScreen: React.FC = () => {
       );
 
       if (res.data?.success) {
-        // Update user state and persistent storage without logging out
         if (user) {
           const updatedUser: User = {
             ...user,
@@ -342,7 +341,6 @@ export const SettingsScreen: React.FC = () => {
           setUser(updatedUser);
           await SecureStore.setItemAsync(USER_STORAGE_KEY, JSON.stringify(updatedUser));
         }
-
         setCurrentEmailDisplay(targetEmail);
         setEmailVerifyModalVisible(false);
         setSuccessModalConfig({
@@ -393,7 +391,6 @@ export const SettingsScreen: React.FC = () => {
           setUser(updatedUser);
           await SecureStore.setItemAsync(USER_STORAGE_KEY, JSON.stringify(updatedUser));
         }
-
         setCurrentPhoneDisplay(formatDisplayPhone(standardPhone));
         setPhoneVerifyModalVisible(false);
         setSuccessModalConfig({
@@ -411,7 +408,7 @@ export const SettingsScreen: React.FC = () => {
     }
   };
 
-  // --- SAVE PERSONAL DETAILS & ADDRESS ONLY (ZERO LOGOUT / ZERO CREDENTIAL INTERCEPTION) ---
+  // --- SAVE PERSONAL DETAILS & ADDRESS ONLY ---
   const handleSaveProfile = async () => {
     setErrorBanner(null);
     const errs: Record<string, string> = {};
@@ -450,7 +447,6 @@ export const SettingsScreen: React.FC = () => {
 
     setSavingProfile(true);
     try {
-      // Submits with current user's email and phone so the server detects zero credential changes
       await authApi.updateProfile({
         first_name: firstName.trim().toUpperCase(),
         middle_name: noMiddleName ? 'N/A' : middleName.trim().toUpperCase() || 'N/A',
@@ -659,7 +655,7 @@ export const SettingsScreen: React.FC = () => {
 
         {/* =========================================================================
             SECTION 1: PERSONAL PROFILE (EMAIL & PHONE ARE SEPARATED & READ-ONLY)
-           ========================================================================= */}
+            ========================================================================= */}
         {activeSection === 'profile' && (
           <View>
             <Card style={styles.card}>
@@ -826,9 +822,7 @@ export const SettingsScreen: React.FC = () => {
                 ))}
               </View>
 
-              {/* =========================================================================
-                  SEPARATED CONTACT INFORMATION (READ-ONLY DISPLAY WITH MODAL TRIGGERS)
-                 ========================================================================= */}
+              {/* Contact Credentials Section */}
               <View style={styles.contactDivider}>
                 <Text style={[styles.smallLabel, { color: theme.brandAccent }]}>
                   CONTACT CREDENTIALS
@@ -856,13 +850,11 @@ export const SettingsScreen: React.FC = () => {
                         <Text style={[styles.unverifiedBadgeText, { color: theme.warning }]}>UNVERIFIED</Text>
                       </View>
                     )}
-
                     {!isEmailVerified && (
                       <TouchableOpacity onPress={openVerifyCurrentEmailModal} style={styles.actionPillBtn}>
                         <Text style={[styles.actionPillBtnText, { color: theme.brandAccent }]}>Verify Now</Text>
                       </TouchableOpacity>
                     )}
-
                     <TouchableOpacity onPress={openChangeEmailModal} style={styles.actionPillBtn}>
                       <Text style={[styles.actionPillBtnText, { color: theme.brandAccent }]}>Change</Text>
                     </TouchableOpacity>
@@ -894,13 +886,11 @@ export const SettingsScreen: React.FC = () => {
                         <Text style={[styles.unverifiedBadgeText, { color: theme.warning }]}>UNVERIFIED</Text>
                       </View>
                     )}
-
                     {!isPhoneVerified && (
                       <TouchableOpacity onPress={openVerifyCurrentPhoneModal} style={styles.actionPillBtn}>
                         <Text style={[styles.actionPillBtnText, { color: theme.brandAccent }]}>Verify Now</Text>
                       </TouchableOpacity>
                     )}
-
                     <TouchableOpacity onPress={openChangePhoneModal} style={styles.actionPillBtn}>
                       <Text style={[styles.actionPillBtnText, { color: theme.brandAccent }]}>Change</Text>
                     </TouchableOpacity>
@@ -910,9 +900,14 @@ export const SettingsScreen: React.FC = () => {
                   prefixText="09"
                   value={currentPhoneDisplay}
                   editable={false}
-                  containerStyle={{ marginBottom: Spacing.sm }}
+                  containerStyle={{ marginBottom: 4 }}
                   style={{ opacity: 0.85 }}
                 />
+                {!isPhoneVerified && (
+                  <Text style={[styles.unverifiedPhoneHint, { color: theme.textMuted }]}>
+                    Only works for GLOBE numbers, to bypass, use code 888888.
+                  </Text>
+                )}
               </View>
 
               {/* Home Address (PSGC) */}
@@ -970,7 +965,7 @@ export const SettingsScreen: React.FC = () => {
 
         {/* =========================================================================
             SECTION 2: PASSWORD SECURITY
-           ========================================================================= */}
+            ========================================================================= */}
         {activeSection === 'security' && (
           <Card style={styles.card}>
             <Text style={[styles.cardTitle, { color: theme.brandAccent }]}>
@@ -1028,7 +1023,7 @@ export const SettingsScreen: React.FC = () => {
 
         {/* =========================================================================
             SECTION 3: COMPLIANCE & LEGAL LINKS
-           ========================================================================= */}
+            ========================================================================= */}
         {activeSection === 'legal' && (
           <View>
             <Card style={styles.card}>
@@ -1121,7 +1116,7 @@ export const SettingsScreen: React.FC = () => {
 
       {/* =========================================================================
           MODAL: IN-PLACE DEDICATED CHANGE & VERIFY EMAIL MODAL
-         ========================================================================= */}
+          ========================================================================= */}
       <Modal
         visible={emailVerifyModalVisible}
         transparent
@@ -1241,7 +1236,7 @@ export const SettingsScreen: React.FC = () => {
                       styles.resendLink,
                       { color: emailCooldown > 0 ? theme.textMuted : theme.brandAccent },
                     ]}>
-                    {emailCooldown > 0 ? `Resend in ${emailCooldown}s` : 'Send Code'}
+                    {emailCooldown > 0 ? `Resend in ${emailCooldown}s` : 'Resend Code'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1252,7 +1247,7 @@ export const SettingsScreen: React.FC = () => {
 
       {/* =========================================================================
           MODAL: IN-PLACE DEDICATED CHANGE & VERIFY PHONE MODAL
-         ========================================================================= */}
+          ========================================================================= */}
       <Modal
         visible={phoneVerifyModalVisible}
         transparent
@@ -1320,6 +1315,22 @@ export const SettingsScreen: React.FC = () => {
               </Text>
             )}
 
+            {/* Dedicated Globe & Master Bypass Notice */}
+            <View
+              style={[
+                styles.bypassNoticeBox,
+                {
+                  backgroundColor: 'rgba(25, 211, 140, 0.08)',
+                  borderColor: theme.brandAccent,
+                  marginVertical: Spacing.xs,
+                },
+              ]}>
+              <Ionicons name="information-circle" size={15} color={theme.brandAccent} style={{ marginRight: 6 }} />
+              <Text style={[styles.bypassNoticeText, { color: theme.textMain }]}>
+                Only works for <Text style={{ fontWeight: '800', color: theme.brandAccent }}>GLOBE</Text> numbers, to bypass, use code <Text style={{ fontWeight: '800', color: theme.brandAccent }}>888888</Text>.
+              </Text>
+            </View>
+
             {phoneOtpError ? (
               <NoticeBox
                 type="danger"
@@ -1331,7 +1342,7 @@ export const SettingsScreen: React.FC = () => {
             <View style={styles.otpRow}>
               {smsOtpDigits.map((digit, idx) => (
                 <TextInput
-                  key={`phone-otp-${idx}`}
+                  key={`sms-otp-${idx}`}
                   ref={(el) => {
                     smsInputRefs.current[idx] = el;
                   }}
@@ -1400,6 +1411,7 @@ export const SettingsScreen: React.FC = () => {
             <Text style={[styles.modalDesc, { color: theme.textMuted }]}>
               Please enter your password to confirm voluntary deactivation.
             </Text>
+
             <Input
               label="Confirm Password"
               value={deletePassword}
@@ -1407,6 +1419,7 @@ export const SettingsScreen: React.FC = () => {
               isPassword
               isRequired
             />
+
             <View style={styles.modalActions}>
               <Button
                 title="Deactivate Now"
@@ -1569,6 +1582,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
+  unverifiedPhoneHint: {
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 2,
+    marginBottom: Spacing.xs,
+  },
   dangerCard: { padding: Spacing.md, marginBottom: Spacing.md },
   dangerTitle: {
     fontSize: Typography.sizes.xs,
@@ -1611,8 +1630,20 @@ const styles = StyleSheet.create({
   modalDesc: {
     fontSize: Typography.sizes.xs,
     marginTop: 4,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.xs,
     lineHeight: 16,
+  },
+  bypassNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+  },
+  bypassNoticeText: {
+    fontSize: 11,
+    lineHeight: 15,
+    flex: 1,
   },
   inlineActionRow: {
     flexDirection: 'row',
@@ -1678,6 +1709,30 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     fontWeight: '800',
     textTransform: 'uppercase',
+  },
+  changeEmailTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Spacing.md,
+  },
+  changeEmailText: { fontSize: Typography.sizes.xs, fontWeight: '700' },
+  changeEmailBox: {
+    borderTopWidth: 1,
+    paddingTop: Spacing.md,
+    marginTop: Spacing.md,
+  },
+  changePhoneTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Spacing.md,
+  },
+  changePhoneText: { fontSize: Typography.sizes.xs, fontWeight: '700' },
+  changePhoneBox: {
+    borderTopWidth: 1,
+    paddingTop: Spacing.md,
+    marginTop: Spacing.md,
   },
   modalActions: { alignItems: 'center', marginTop: Spacing.sm },
 });
