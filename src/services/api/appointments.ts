@@ -21,11 +21,9 @@ export const appointmentsApi = {
     const selfData = Array.isArray(response.data.self)
       ? response.data.self
       : response.data.self?.data || [];
-
     const dependentsData = Array.isArray(response.data.dependents)
       ? response.data.dependents
       : response.data.dependents?.data || [];
-
     const bulkCount = response.data.bulkPaginator?.total || 0;
 
     return {
@@ -79,7 +77,6 @@ export const appointmentsApi = {
     formData: FormData
   ): Promise<{ success: boolean; message?: string }> => {
     formData.append('_method', 'PUT');
-
     const response = await apiClient.post<{ success: boolean; message?: string }>(
       `/appointments/${id}`,
       formData,
@@ -93,13 +90,17 @@ export const appointmentsApi = {
   },
 
   /**
-   * Cancels a pending, approved, or returned appointment
+   * Cancels a pending, approved, or returned appointment with audit reason
    */
   cancelAppointment: async (
-    id: number
+    id: number,
+    cancellationReason?: string
   ): Promise<{ success: boolean; message?: string }> => {
     const response = await apiClient.post<{ success: boolean; message?: string }>(
-      `/appointments/${id}/cancel`
+      `/appointments/${id}/cancel`,
+      cancellationReason
+        ? { cancellation_reason: cancellationReason, reason: cancellationReason }
+        : {}
     );
     return response.data;
   },

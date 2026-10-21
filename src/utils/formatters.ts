@@ -8,18 +8,27 @@ export { calculateAge } from './validators';
 // ============================================================================
 
 /**
+ * Standard Cancellation Reasons (mirrors web portal selection)
+ */
+export const CANCELLATION_REASONS = [
+  'Change of schedule / Unforeseen personal conflict',
+  'Doctor advised to postpone or cancel test',
+  'Patient feeling unwell / Unable to visit clinic',
+  'Found alternative clinic / duplicate booking',
+  'Financial or budget constraints',
+  'Others',
+] as const;
+
+/**
  * Accurately constructs a local Date object from an appointment date & time slot,
  * preventing UTC date shifting across timezones.
  */
 export function getAppointmentScheduledDate(appointment: Appointment): Date | null {
   if (!appointment.appointment_date) return null;
-
   let year: number;
   let month: number; // 0-indexed
   let day: number;
-
   const rawDate = appointment.appointment_date;
-
   if (rawDate.includes('T')) {
     const parsed = new Date(rawDate);
     if (isNaN(parsed.getTime())) return null;
@@ -33,11 +42,9 @@ export function getAppointmentScheduledDate(appointment: Appointment): Date | nu
     month = parts[1] - 1;
     day = parts[2];
   }
-
   let hours = 0;
   let minutes = 0;
   let seconds = 0;
-
   if (appointment.time_slot) {
     const timeParts = appointment.time_slot.split(':').map((p) => parseInt(p, 10));
     if (timeParts.length >= 2 && !isNaN(timeParts[0]) && !isNaN(timeParts[1])) {
@@ -48,7 +55,6 @@ export function getAppointmentScheduledDate(appointment: Appointment): Date | nu
       }
     }
   }
-
   return new Date(year, month, day, hours, minutes, seconds);
 }
 
@@ -62,17 +68,13 @@ export function getCancellationPolicyDetails(appointment: Appointment): {
 } {
   const scheduled = getAppointmentScheduledDate(appointment);
   const scheduledFormatted = `${formatDate(appointment.appointment_date)} ${formatTimeSlot(appointment.time_slot)}`;
-
   if (!scheduled) {
     return { isWithin24Hours: false, scheduledFormatted, diffHours: 999 };
   }
-
   const now = new Date();
   const diffHours = (scheduled.getTime() - now.getTime()) / (1000 * 60 * 60);
-
   // Strictly within 24 hours: 0 <= diffHours < 24
   const isWithin24Hours = diffHours >= 0 && diffHours < 24;
-
   return { isWithin24Hours, scheduledFormatted, diffHours };
 }
 
@@ -86,12 +88,10 @@ export function isAppointmentExpired(appointment: Appointment): boolean {
   if (appointment.status === 'expired') {
     return true;
   }
-
   const scheduled = getAppointmentScheduledDate(appointment);
   if (!scheduled || isNaN(scheduled.getTime())) {
     return false;
   }
-
   // Matching Laravel Carbon rule: now > scheduledAt + 24 hours
   const expiryTimestamp = scheduled.getTime() + 24 * 60 * 60 * 1000;
   return Date.now() > expiryTimestamp;
@@ -119,7 +119,6 @@ export function calculatePatientAge(appointment: Appointment): string {
   ) {
     return `${appointment.patient_age} Years Old`;
   }
-
   const rawBirthdate =
     appointment.patient_birthdate || appointment.dependent?.birthdate;
   if (rawBirthdate) {
@@ -287,7 +286,6 @@ export function formatRelativeTime(dateString?: string | null): string {
     const diffMins = Math.floor(diffSecs / 60);
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
-
     if (diffSecs < 60) return 'Just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;

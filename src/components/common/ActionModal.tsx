@@ -6,6 +6,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../hooks/useTheme';
@@ -104,7 +107,9 @@ export const ActionModal: React.FC<ActionModalProps> = ({
       transparent
       animationType="fade"
       onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.modalOverlay}>
         <View
           style={[
             styles.modalCard,
@@ -125,13 +130,21 @@ export const ActionModal: React.FC<ActionModalProps> = ({
             <Ionicons name={activeIcon} size={32} color={config.badgeColor} />
           </View>
 
-          {/* Modal Header & Text Content */}
+          {/* Modal Header */}
           <Text style={[styles.modalTitle, { color: theme.textMain }]}>{title}</Text>
-          {typeof message === 'string' ? (
-            <Text style={[styles.modalMessage, { color: theme.textMuted }]}>{message}</Text>
-          ) : (
-            message
-          )}
+
+          {/* Scrollable Message / Form Content Container */}
+          <ScrollView
+            style={styles.scrollWrapper}
+            contentContainerStyle={styles.scrollContentWrapper}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled">
+            {typeof message === 'string' ? (
+              <Text style={[styles.modalMessage, { color: theme.textMuted }]}>{message}</Text>
+            ) : (
+              message
+            )}
+          </ScrollView>
 
           {/* Action Buttons Row */}
           <View style={styles.actionsRow}>
@@ -166,7 +179,7 @@ export const ActionModal: React.FC<ActionModalProps> = ({
             )}
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -182,9 +195,10 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 360,
+    maxHeight: '90%',
     borderRadius: BorderRadius.lg,
     borderWidth: 1.5,
-    padding: Spacing.xl,
+    padding: Spacing.lg,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -199,7 +213,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   modalTitle: {
     fontSize: Typography.sizes.md + 1,
@@ -209,16 +223,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: Spacing.xs,
   },
+  scrollWrapper: {
+    width: '100%',
+    maxHeight: 380,
+    marginVertical: Spacing.xs,
+  },
+  scrollContentWrapper: {
+    alignItems: 'center',
+    width: '100%',
+  },
   modalMessage: {
     fontSize: Typography.sizes.xs + 1,
     lineHeight: 19,
     textAlign: 'center',
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.md,
   },
   actionsRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
     width: '100%',
+    marginTop: Spacing.sm,
   },
   actionBtn: {
     flex: 1,

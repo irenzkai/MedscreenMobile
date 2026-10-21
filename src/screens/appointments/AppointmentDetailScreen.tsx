@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +37,7 @@ import {
   getEffectiveAppointmentStatus,
   calculatePatientAge,
   getCancellationPolicyDetails,
+  CANCELLATION_REASONS,
 } from '../../utils/formatters';
 import { CONFIG } from '../../constants/config';
 import { Spacing, Typography, BorderRadius } from '../../constants/theme';
@@ -62,6 +64,12 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [forwardLoading, setForwardLoading] = useState<boolean>(false);
   const [cancelLoading, setCancelLoading] = useState<boolean>(false);
+
+  // Cancellation Reason Selection States
+  const [cancelReason, setCancelReason] = useState<string>('');
+  const [customCancelReason, setCustomCancelReason] = useState<string>('');
+  const [cancelReasonDropdownOpen, setCancelReasonDropdownOpen] = useState<boolean>(false);
+  const [cancelReasonError, setCancelReasonError] = useState<string | null>(null);
 
   // Unified Modals State
   const [forwardConfirmVisible, setForwardConfirmVisible] = useState<boolean>(false);
@@ -298,18 +306,33 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
 
   // Cancel Appointment via ActionModal
   const handleExecuteCancel = async () => {
+    if (!cancelReason) {
+      setCancelReasonError('Please select a cancellation reason.');
+      return;
+    }
+    const finalReason = cancelReason === 'Others' ? customCancelReason.trim() : cancelReason.trim();
+    if (!finalReason || finalReason.length < 5) {
+      setCancelReasonError('Please provide a reason of at least 5 characters.');
+      return;
+    }
+
     setCancelLoading(true);
     try {
-      const res = await appointmentsApi.cancelAppointment(appointment.id);
+      const res = await appointmentsApi.cancelAppointment(appointment.id, finalReason);
       setCancelConfirmVisible(false);
+      setCancelReason('');
+      setCustomCancelReason('');
+      setCancelReasonDropdownOpen(false);
+      setCancelReasonError(null);
       setSuccessModalConfig({
         visible: true,
         title: 'Appointment Canceled',
         message: res.message || 'Your appointment booking has been successfully canceled.',
       });
       loadDetails();
-    } catch {
+    } catch (err: any) {
       setCancelConfirmVisible(false);
+      setCancelReasonError(err?.message || 'Failed to cancel appointment.');
     } finally {
       setCancelLoading(false);
     }
@@ -659,7 +682,6 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                 onPress={() => setForwardConfirmVisible(true)}
               />
             </View>
-
             <View style={styles.reportsList}>
               {availableReports.map((report) => (
                 <View
@@ -743,14 +765,19 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
               style={{ marginBottom: Spacing.sm }}
             />
           )}
-
           {canCancel && (
             <Button
               title="Cancel Appointment"
               variant="danger"
               size="md"
               icon={<Ionicons name="close-circle-outline" size={16} color="#FFFFFF" />}
-              onPress={() => setCancelConfirmVisible(true)}
+              onPress={() => {
+                setCancelReason('');
+                setCustomCancelReason('');
+                setCancelReasonDropdownOpen(false);
+                setCancelReasonError(null);
+                setCancelConfirmVisible(true);
+              }}
             />
           )}
         </View>
@@ -771,17 +798,23 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
         onConfirm={handleExecuteForwardResults}
       />
 
-      {/* UNIFIED MODAL: Dynamic 24-Hour Cancellation Confirmation */}
+      {/* UNIFIED MODAL: Dynamic 24-Hour Cancellation Confirmation with Reason */}
       <ActionModal
         visible={cancelConfirmVisible}
         type="danger"
         icon="close-circle-outline"
         title="Cancel Appointment"
-        confirmText="Cancel"
-        cancelText="Keep"
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
         confirmVariant="danger"
         loading={cancelLoading}
-        onClose={() => setCancelConfirmVisible(false)}
+        onClose={() => {
+          setCancelConfirmVisible(false);
+          setCancelReason('');
+          setCustomCancelReason('');
+          setCancelReasonDropdownOpen(false);
+          setCancelReasonError(null);
+        }}
         onConfirm={handleExecuteCancel}
         message={
           <View style={styles.cancelModalContent}>
@@ -889,6 +922,116 @@ export const AppointmentDetailScreen: React.FC<Props> = ({ route, navigation }) 
                 </Text>
               </View>
             )}
+
+            {/* Reason for Cancellation Selection Form */}
+            <View style={styles.reasonSection}>
+              <Text style={[styles.reasonLabel, { color: theme.textMuted }]}>
+                REASON FOR CANCELLATION *
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setCancelReasonDropdownOpen((prev) => !prev)}
+                style={[
+                  styles.reasonPickerTrigger,
+                  {
+                    backgroundColor: theme.bgCard,
+                    borderColor: cancelReasonError ? theme.danger : theme.borderColor,
+                  },
+                ]}>
+                <Text
+                  style={[
+                    styles.reasonTriggerText,
+                    { color: cancelReason ? theme.textMain : theme.textMuted },
+                  ]}
+                  numberOfLines={1}>
+                  {cancelReason || '-- Select a cancellation reason --'}
+                </Text>
+                <Ionicons
+                  name={cancelReasonDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={theme.textMuted}
+                />
+              </TouchableOpacity>
+
+              {cancelReasonDropdownOpen && (
+                <View
+                  style={[
+                    styles.reasonDropdownList,
+                    { backgroundColor: theme.bgCard, borderColor: theme.borderColor },
+                  ]}>
+                  {CANCELLATION_REASONS.map((r) => {
+                    const isSelected = cancelReason === r;
+                    return (
+                      <TouchableOpacity
+                        key={r}
+                        onPress={() => {
+                          setCancelReason(r);
+                          setCancelReasonDropdownOpen(false);
+                          setCancelReasonError(null);
+                        }}
+                        style={[
+                          styles.reasonOptionItem,
+                          {
+                            backgroundColor: isSelected ? theme.surfaceSubtle : 'transparent',
+                            borderBottomColor: theme.borderColor,
+                          },
+                        ]}>
+                        <Text
+                          style={[
+                            styles.reasonOptionText,
+                            {
+                              color: isSelected ? theme.brandAccent : theme.textMain,
+                              fontWeight: isSelected ? '800' : '500',
+                            },
+                          ]}>
+                          {r}
+                        </Text>
+                        {isSelected && (
+                          <Ionicons name="checkmark" size={16} color={theme.brandAccent} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Dynamic Custom Reason Input for Others */}
+              {cancelReason === 'Others' && (
+                <View style={styles.customReasonBox}>
+                  <Text style={[styles.customReasonLabel, { color: theme.textMuted }]}>
+                    SPECIFY CUSTOM REASON *
+                  </Text>
+                  <TextInput
+                    value={customCancelReason}
+                    onChangeText={(val) => {
+                      setCustomCancelReason(val);
+                      if (cancelReasonError) setCancelReasonError(null);
+                    }}
+                    placeholder="Provide details regarding the cancellation..."
+                    placeholderTextColor={theme.textMuted}
+                    multiline
+                    numberOfLines={3}
+                    style={[
+                      styles.customReasonInput,
+                      {
+                        backgroundColor: theme.bgCard,
+                        borderColor: cancelReasonError ? theme.danger : theme.borderColor,
+                        color: theme.textMain,
+                      },
+                    ]}
+                  />
+                  <Text style={[styles.charHint, { color: theme.textMuted }]}>
+                    Minimum 5 characters required for validation.
+                  </Text>
+                </View>
+              )}
+
+              {cancelReasonError ? (
+                <Text style={[styles.reasonErrorText, { color: theme.danger }]}>
+                  {cancelReasonError}
+                </Text>
+              ) : null}
+            </View>
           </View>
         }
       />
@@ -1166,6 +1309,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     borderWidth: 1,
     marginTop: 4,
+    marginBottom: Spacing.sm,
   },
   cancelAlertHeader: {
     flexDirection: 'row',
@@ -1185,5 +1329,80 @@ const styles = StyleSheet.create({
   },
   policyHighlight: {
     fontWeight: '800',
+  },
+  // Cancellation Reason UI Styles
+  reasonSection: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  reasonLabel: {
+    fontSize: Typography.sizes.xs - 2,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  reasonPickerTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.sm + 2,
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderRadius: BorderRadius.sm,
+  },
+  reasonTriggerText: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 6,
+  },
+  reasonDropdownList: {
+    borderWidth: 1.5,
+    borderRadius: BorderRadius.sm,
+    marginTop: 4,
+    overflow: 'hidden',
+  },
+  reasonOptionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: Spacing.sm + 2,
+    borderBottomWidth: 1,
+  },
+  reasonOptionText: {
+    fontSize: Typography.sizes.xs - 1,
+    flex: 1,
+    marginRight: 4,
+  },
+  customReasonBox: {
+    marginTop: Spacing.xs,
+    width: '100%',
+  },
+  customReasonLabel: {
+    fontSize: Typography.sizes.xs - 2,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  customReasonInput: {
+    borderWidth: 1.5,
+    borderRadius: BorderRadius.sm,
+    padding: Spacing.sm,
+    fontSize: Typography.sizes.xs,
+    textAlignVertical: 'top',
+    minHeight: 65,
+  },
+  charHint: {
+    fontSize: Typography.sizes.xs - 2,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  reasonErrorText: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '700',
+    marginTop: 4,
   },
 });

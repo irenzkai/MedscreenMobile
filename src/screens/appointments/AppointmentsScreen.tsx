@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
+  TextInput,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -34,6 +35,7 @@ import {
   isAppointmentExpired,
   getEffectiveAppointmentStatus,
   getCancellationPolicyDetails,
+  CANCELLATION_REASONS,
 } from '../../utils/formatters';
 import { Spacing, Typography, BorderRadius, StatusColors } from '../../constants/theme';
 
@@ -74,6 +76,14 @@ export const AppointmentsScreen: React.FC = () => {
 
   // External site redirect modal
   const [bulkRedirectModalVisible, setBulkRedirectModalVisible] = useState<boolean>(false);
+
+  // Cancellation Reason Flow States
+  const [cancelModalVisible, setCancelModalVisible] = useState<boolean>(false);
+  const [cancelingApp, setCancelingApp] = useState<Appointment | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>('');
+  const [customCancelReason, setCustomCancelReason] = useState<string>('');
+  const [cancelReasonDropdownOpen, setCancelReasonDropdownOpen] = useState<boolean>(false);
+  const [cancelReasonError, setCancelReasonError] = useState<string | null>(null);
 
   // Confirmation & Success Modals
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -137,6 +147,7 @@ export const AppointmentsScreen: React.FC = () => {
       const effectiveStatus = getEffectiveAppointmentStatus(app);
       const matchesStatus =
         selectedStatus === 'all' || effectiveStatus === selectedStatus;
+
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch =
         !q ||
@@ -153,156 +164,56 @@ export const AppointmentsScreen: React.FC = () => {
 
   const handlePromptCancel = (app: Appointment) => {
     const effectiveStatus = getEffectiveAppointmentStatus(app);
-
     // Safety Guard: Approved appointments cannot be canceled
     if (effectiveStatus === 'approved' || app.status === 'approved') {
       return;
     }
+    setCancelingApp(app);
+    setCancelReason('');
+    setCustomCancelReason('');
+    setCancelReasonDropdownOpen(false);
+    setCancelReasonError(null);
+    setCancelModalVisible(true);
+  };
 
-    // Uses the shared timezone-safe cancellation calculator
-    const { isWithin24Hours, scheduledFormatted } = getCancellationPolicyDetails(app);
-    const isPaid = app.payment_status === 'paid';
+  const handleExecuteCancel = async () => {
+    if (!cancelingApp) return;
 
-    setConfirmModalConfig({
-      visible: true,
-      title: 'Cancel Appointment',
-      confirmText: 'Cancel',
-      cancelText: 'Keep',
-      icon: 'close-circle-outline',
-      onConfirm: async () => {
-        setActionLoading(true);
-        try {
-          const res = await appointmentsApi.cancelAppointment(app.id);
-          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
-          setSuccessModalConfig({
-            visible: true,
-            title: 'Appointment Canceled',
-            message: res.message || 'Your appointment booking has been successfully canceled.',
-          });
-          fetchAppointments();
-        } catch (err: any) {
-          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
-          setSuccessModalConfig({
-            visible: true,
-            title: 'Cancellation Failed',
-            message: err?.message || 'Unable to cancel appointment. Please contact clinic staff.',
-          });
-        } finally {
-          setActionLoading(false);
-        }
-      },
-      message: (
-        <View style={styles.cancelModalContent}>
-          <Text style={[styles.cancelModalPrompt, { color: theme.textMain }]}>
-            Are you sure you want to cancel this appointment?
-          </Text>
+    if (!cancelReason) {
+      setCancelReasonError('Please select a cancellation reason.');
+      return;
+    }
+    const finalReason = cancelReason === 'Others' ? customCancelReason.trim() : cancelReason.trim();
+    if (!finalReason || finalReason.length < 5) {
+      setCancelReasonError('Please provide a reason of at least 5 characters.');
+      return;
+    }
 
-          {/* Cashless Booking Disclosures */}
-          {app.payment_method === 'Cashless' ? (
-            isPaid ? (
-              isWithin24Hours ? (
-                <View
-                  style={[
-                    styles.cancelAlertBox,
-                    { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
-                  ]}>
-                  <View style={styles.cancelAlertHeader}>
-                    <Ionicons name="checkmark-circle" size={14} color={theme.success} />
-                    <Text style={[styles.cancelAlertBadgeText, { color: theme.success }]}>
-                      Payment Status: Confirmed Paid
-                    </Text>
-                  </View>
-                  <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                    <Text style={[styles.policyHighlight, { color: theme.warning }]}>
-                      50% Fee Applies:{' '}
-                    </Text>
-                    Because cancellation is requested within 24 hours of your slot ({scheduledFormatted}), a{' '}
-                    <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies. 50% will be refunded to your account.
-                  </Text>
-                </View>
-              ) : (
-                <View
-                  style={[
-                    styles.cancelAlertBox,
-                    { backgroundColor: 'rgba(25, 211, 140, 0.08)', borderColor: theme.brandAccent },
-                  ]}>
-                  <View style={styles.cancelAlertHeader}>
-                    <Ionicons name="checkmark-circle" size={14} color={theme.success} />
-                    <Text style={[styles.cancelAlertBadgeText, { color: theme.success }]}>
-                      Payment Status: Confirmed Paid
-                    </Text>
-                  </View>
-                  <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                    <Text style={[styles.policyHighlight, { color: theme.brandAccent }]}>
-                      100% Full Refund Eligible:{' '}
-                    </Text>
-                    You are canceling more than 24 hours in advance. Your paid cashless transaction is eligible for a{' '}
-                    <Text style={{ fontWeight: '800' }}>100% full refund</Text>.
-                  </Text>
-                </View>
-              )
-            ) : isWithin24Hours ? (
-              <View
-                style={[
-                  styles.cancelAlertBox,
-                  { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
-                ]}>
-                <View style={styles.cancelAlertHeader}>
-                  <Ionicons name="time" size={14} color={theme.warning} />
-                  <Text style={[styles.cancelAlertBadgeText, { color: theme.warning }]}>
-                    Payment Status: Pending Verification
-                  </Text>
-                </View>
-                <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                  Your uploaded payment receipt has not been confirmed yet. Since you are canceling within 24 hours of your slot ({scheduledFormatted}), a{' '}
-                  <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies upon confirmation.
-                </Text>
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.cancelAlertBox,
-                  { backgroundColor: 'rgba(13, 202, 240, 0.08)', borderColor: theme.info },
-                ]}>
-                <View style={styles.cancelAlertHeader}>
-                  <Ionicons name="time" size={14} color={theme.info} />
-                  <Text style={[styles.cancelAlertBadgeText, { color: theme.info }]}>
-                    Payment Status: Pending Verification
-                  </Text>
-                </View>
-                <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                  Your uploaded payment receipt has not been confirmed yet. Since you are canceling more than 24 hours in advance, the booking will be canceled with no charge.
-                </Text>
-              </View>
-            )
-          ) : (
-            /* Cash on Site Booking Disclosures */
-            isWithin24Hours ? (
-              <View
-                style={[
-                  styles.cancelAlertBox,
-                  { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
-                ]}>
-                <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
-                  <Text style={[styles.policyHighlight, { color: theme.warning }]}>Notice: </Text>
-                  Canceling within 24 hours of your scheduled appointment time ({scheduledFormatted}).
-                </Text>
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.cancelAlertBox,
-                  { backgroundColor: 'rgba(108, 117, 125, 0.08)', borderColor: theme.borderColor },
-                ]}>
-                <Text style={[styles.cancelAlertBody, { color: theme.textMuted }]}>
-                  Free cancellation available for this cash booking (more than 24 hours in advance).
-                </Text>
-              </View>
-            )
-          )}
-        </View>
-      ),
-    });
+    setActionLoading(true);
+    try {
+      const res = await appointmentsApi.cancelAppointment(cancelingApp.id, finalReason);
+      setCancelModalVisible(false);
+      setCancelingApp(null);
+      setCancelReason('');
+      setCustomCancelReason('');
+      setCancelReasonDropdownOpen(false);
+      setCancelReasonError(null);
+      setSuccessModalConfig({
+        visible: true,
+        title: 'Appointment Canceled',
+        message: res.message || 'Your appointment booking has been successfully canceled.',
+      });
+      fetchAppointments();
+    } catch (err: any) {
+      setCancelModalVisible(false);
+      setSuccessModalConfig({
+        visible: true,
+        title: 'Cancellation Failed',
+        message: err?.message || 'Unable to cancel appointment. Please contact clinic staff.',
+      });
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handlePromptDeleteExpired = (app: Appointment) => {
@@ -376,7 +287,6 @@ export const AppointmentsScreen: React.FC = () => {
               Myself ({selfAppointments.length})
             </Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             onPress={() => setActiveTab('family')}
             style={[
@@ -394,7 +304,6 @@ export const AppointmentsScreen: React.FC = () => {
               Family ({dependentAppointments.length})
             </Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             onPress={() => setActiveTab('bulk')}
             style={[
@@ -551,7 +460,257 @@ export const AppointmentsScreen: React.FC = () => {
         }}
       />
 
-      {/* UNIFIED MODAL: Confirmation for Cancel / Delete */}
+      {/* UNIFIED MODAL: Dynamic 24-Hour Cancellation Confirmation with Reason */}
+      <ActionModal
+        visible={cancelModalVisible}
+        type="danger"
+        icon="close-circle-outline"
+        title="Cancel Appointment"
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
+        confirmVariant="danger"
+        loading={actionLoading}
+        onClose={() => {
+          setCancelModalVisible(false);
+          setCancelingApp(null);
+          setCancelReason('');
+          setCustomCancelReason('');
+          setCancelReasonDropdownOpen(false);
+          setCancelReasonError(null);
+        }}
+        onConfirm={handleExecuteCancel}
+        message={
+          cancelingApp ? (
+            <View style={styles.cancelModalContent}>
+              <Text style={[styles.cancelModalPrompt, { color: theme.textMain }]}>
+                Are you sure you want to cancel this appointment?
+              </Text>
+
+              {/* Cashless Booking Disclosures */}
+              {(() => {
+                const { isWithin24Hours, scheduledFormatted } = getCancellationPolicyDetails(cancelingApp);
+                const isPaid = cancelingApp.payment_status === 'paid';
+
+                if (cancelingApp.payment_method === 'Cashless') {
+                  if (isPaid) {
+                    return isWithin24Hours ? (
+                      <View
+                        style={[
+                          styles.cancelAlertBox,
+                          { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
+                        ]}>
+                        <View style={styles.cancelAlertHeader}>
+                          <Ionicons name="checkmark-circle" size={14} color={theme.success} />
+                          <Text style={[styles.cancelAlertBadgeText, { color: theme.success }]}>
+                            Payment Status: Confirmed Paid
+                          </Text>
+                        </View>
+                        <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                          <Text style={[styles.policyHighlight, { color: theme.warning }]}>
+                            50% Fee Applies:{' '}
+                          </Text>
+                          Because cancellation is requested within 24 hours of your slot ({scheduledFormatted}), a{' '}
+                          <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies. 50% will be refunded to your account.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.cancelAlertBox,
+                          { backgroundColor: 'rgba(25, 211, 140, 0.08)', borderColor: theme.brandAccent },
+                        ]}>
+                        <View style={styles.cancelAlertHeader}>
+                          <Ionicons name="checkmark-circle" size={14} color={theme.success} />
+                          <Text style={[styles.cancelAlertBadgeText, { color: theme.success }]}>
+                            Payment Status: Confirmed Paid
+                          </Text>
+                        </View>
+                        <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                          <Text style={[styles.policyHighlight, { color: theme.brandAccent }]}>
+                            100% Full Refund Eligible:{' '}
+                          </Text>
+                          You are canceling more than 24 hours in advance. Your paid cashless transaction is eligible for a{' '}
+                          <Text style={{ fontWeight: '800' }}>100% full refund</Text>.
+                        </Text>
+                      </View>
+                    );
+                  } else {
+                    return isWithin24Hours ? (
+                      <View
+                        style={[
+                          styles.cancelAlertBox,
+                          { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
+                        ]}>
+                        <View style={styles.cancelAlertHeader}>
+                          <Ionicons name="time" size={14} color={theme.warning} />
+                          <Text style={[styles.cancelAlertBadgeText, { color: theme.warning }]}>
+                            Payment Status: Pending Verification
+                          </Text>
+                        </View>
+                        <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                          Your uploaded payment receipt has not been confirmed yet. Since you are canceling within 24 hours of your slot ({scheduledFormatted}), a{' '}
+                          <Text style={{ fontWeight: '800' }}>50% administrative cancellation fee</Text> applies upon confirmation.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.cancelAlertBox,
+                          { backgroundColor: 'rgba(13, 202, 240, 0.08)', borderColor: theme.info },
+                        ]}>
+                        <View style={styles.cancelAlertHeader}>
+                          <Ionicons name="time" size={14} color={theme.info} />
+                          <Text style={[styles.cancelAlertBadgeText, { color: theme.info }]}>
+                            Payment Status: Pending Verification
+                          </Text>
+                        </View>
+                        <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                          Your uploaded payment receipt has not been confirmed yet. Since you are canceling more than 24 hours in advance, the booking will be canceled with no charge.
+                        </Text>
+                      </View>
+                    );
+                  }
+                } else {
+                  return isWithin24Hours ? (
+                    <View
+                      style={[
+                        styles.cancelAlertBox,
+                        { backgroundColor: 'rgba(255, 193, 7, 0.08)', borderColor: theme.warning },
+                      ]}>
+                      <Text style={[styles.cancelAlertBody, { color: theme.textMain }]}>
+                        <Text style={[styles.policyHighlight, { color: theme.warning }]}>Notice: </Text>
+                        Canceling within 24 hours of your scheduled appointment time ({scheduledFormatted}).
+                      </Text>
+                    </View>
+                  ) : (
+                    <View
+                      style={[
+                        styles.cancelAlertBox,
+                        { backgroundColor: 'rgba(108, 117, 125, 0.08)', borderColor: theme.borderColor },
+                      ]}>
+                      <Text style={[styles.cancelAlertBody, { color: theme.textMuted }]}>
+                        Free cancellation available for this cash booking (more than 24 hours in advance).
+                      </Text>
+                    </View>
+                  );
+                }
+              })()}
+
+              {/* Cancellation Reason Selection Form */}
+              <View style={styles.reasonSection}>
+                <Text style={[styles.reasonLabel, { color: theme.textMuted }]}>
+                  REASON FOR CANCELLATION *
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setCancelReasonDropdownOpen((prev) => !prev)}
+                  style={[
+                    styles.reasonPickerTrigger,
+                    {
+                      backgroundColor: theme.bgCard,
+                      borderColor: cancelReasonError ? theme.danger : theme.borderColor,
+                    },
+                  ]}>
+                  <Text
+                    style={[
+                      styles.reasonTriggerText,
+                      { color: cancelReason ? theme.textMain : theme.textMuted },
+                    ]}
+                    numberOfLines={1}>
+                    {cancelReason || '-- Select a cancellation reason --'}
+                  </Text>
+                  <Ionicons
+                    name={cancelReasonDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={theme.textMuted}
+                  />
+                </TouchableOpacity>
+
+                {cancelReasonDropdownOpen && (
+                  <View
+                    style={[
+                      styles.reasonDropdownList,
+                      { backgroundColor: theme.bgCard, borderColor: theme.borderColor },
+                    ]}>
+                    {CANCELLATION_REASONS.map((r) => {
+                      const isSelected = cancelReason === r;
+                      return (
+                        <TouchableOpacity
+                          key={r}
+                          onPress={() => {
+                            setCancelReason(r);
+                            setCancelReasonDropdownOpen(false);
+                            setCancelReasonError(null);
+                          }}
+                          style={[
+                            styles.reasonOptionItem,
+                            {
+                              backgroundColor: isSelected ? theme.surfaceSubtle : 'transparent',
+                              borderBottomColor: theme.borderColor,
+                            },
+                          ]}>
+                          <Text
+                            style={[
+                              styles.reasonOptionText,
+                              {
+                                color: isSelected ? theme.brandAccent : theme.textMain,
+                                fontWeight: isSelected ? '800' : '500',
+                              },
+                            ]}>
+                            {r}
+                          </Text>
+                          {isSelected && (
+                            <Ionicons name="checkmark" size={16} color={theme.brandAccent} />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* Dynamic Custom Reason Input for Others */}
+                {cancelReason === 'Others' && (
+                  <View style={styles.customReasonBox}>
+                    <Text style={[styles.customReasonLabel, { color: theme.textMuted }]}>
+                      SPECIFY CUSTOM REASON *
+                    </Text>
+                    <TextInput
+                      value={customCancelReason}
+                      onChangeText={(val) => {
+                        setCustomCancelReason(val);
+                        if (cancelReasonError) setCancelReasonError(null);
+                      }}
+                      placeholder="Provide details regarding the cancellation..."
+                      placeholderTextColor={theme.textMuted}
+                      multiline
+                      numberOfLines={3}
+                      style={[
+                        styles.customReasonInput,
+                        {
+                          backgroundColor: theme.bgCard,
+                          borderColor: cancelReasonError ? theme.danger : theme.borderColor,
+                          color: theme.textMain,
+                        },
+                      ]}
+                    />
+                    <Text style={[styles.charHint, { color: theme.textMuted }]}>
+                      Minimum 5 characters required for validation.
+                    </Text>
+                  </View>
+                )}
+
+                {cancelReasonError ? (
+                  <Text style={[styles.reasonErrorText, { color: theme.danger }]}>
+                    {cancelReasonError}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          ) : null
+        }
+      />
+
+      {/* UNIFIED MODAL: Confirmation for Delete/Soft-Delete */}
       <ActionModal
         visible={confirmModalConfig.visible}
         type="danger"
@@ -599,7 +758,6 @@ export const AppointmentsScreen: React.FC = () => {
                 <Ionicons name="close" size={20} color={theme.textMuted} />
               </TouchableOpacity>
             </View>
-
             <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
               {STATUS_OPTIONS.map((item) => {
                 const isSelected = selectedStatus === item.key;
@@ -783,7 +941,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   optionLabel: { fontSize: Typography.sizes.xs },
-  // Cancellation Policy Disclosure inside Modal
+  // Cancellation Modal Content & Policy Disclosures
   cancelModalContent: {
     width: '100%',
     marginTop: Spacing.xs,
@@ -799,6 +957,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     borderWidth: 1,
     marginTop: 4,
+    marginBottom: Spacing.sm,
   },
   cancelAlertHeader: {
     flexDirection: 'row',
@@ -818,5 +977,80 @@ const styles = StyleSheet.create({
   },
   policyHighlight: {
     fontWeight: '800',
+  },
+  // Cancellation Reason UI Styles
+  reasonSection: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  reasonLabel: {
+    fontSize: Typography.sizes.xs - 2,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  reasonPickerTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.sm + 2,
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderRadius: BorderRadius.sm,
+  },
+  reasonTriggerText: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 6,
+  },
+  reasonDropdownList: {
+    borderWidth: 1.5,
+    borderRadius: BorderRadius.sm,
+    marginTop: 4,
+    overflow: 'hidden',
+  },
+  reasonOptionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: Spacing.sm + 2,
+    borderBottomWidth: 1,
+  },
+  reasonOptionText: {
+    fontSize: Typography.sizes.xs - 1,
+    flex: 1,
+    marginRight: 4,
+  },
+  customReasonBox: {
+    marginTop: Spacing.xs,
+    width: '100%',
+  },
+  customReasonLabel: {
+    fontSize: Typography.sizes.xs - 2,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  customReasonInput: {
+    borderWidth: 1.5,
+    borderRadius: BorderRadius.sm,
+    padding: Spacing.sm,
+    fontSize: Typography.sizes.xs,
+    textAlignVertical: 'top',
+    minHeight: 65,
+  },
+  charHint: {
+    fontSize: Typography.sizes.xs - 2,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  reasonErrorText: {
+    fontSize: Typography.sizes.xs - 1,
+    fontWeight: '700',
+    marginTop: 4,
   },
 });
